@@ -1,81 +1,113 @@
-extends Node2D
-## 새: 날아 들어와 블록 한쪽에 앉았다가 떠난다. 앉아 있는 동안 그 쪽에 무게(힘)를
-## 실어 미세하게 탑을 기울인다. main이 스폰하고 chirp 사운드를 재생한다.
+extends AnimatableBody2D
+## 새: 날아 들어와 잠시 로밍하다 블록 위에 앉는다. 물리 객체라서 앉아 있을 때 그 위로
+## 블록을 놓으면 새에 걸쳐 기울고, 날아갈 때 위로 블록을 들어올리며 떠난다.
+## 로밍/진입 중에는 충돌을 꺼서 블록을 치지 않는다.
 
 signal left
 
-enum State { FLY_IN, PERCH, FLY_OUT }
+enum S { FLY_IN, ROAM, PERCH, FLY_OUT }
 
-var state: int = State.FLY_IN
+var s: int = S.FLY_IN
 var target_block: Block = null
+var _side: float = 1.0          # 앉을 쪽(+1 오른쪽 / -1 왼쪽)
 var timer: float = 0.0
-var vel: Vector2 = Vector2.ZERO
 var flap: float = 0.0
-var _side: float = 1.0
-
-const WEIGHT := 240.0       # 앉았을 때 싣는 무게(힘)
+var t: float = 0.0
+var roam_target: Vector2 = Vector2.ZERO
+var vel: Vector2 = Vector2.ZERO
+var cshape: CollisionShape2D
+var body_col := Color(0.86, 0.28, 0.22)   # 눈에 잘 띄는 붉은 새
 
 
 func setup(block: Block, from_left: bool) -> void:
 	target_block = block
-	_side = 1.0 if from_left else -1.0
-	position = _perch_world() + Vector2(-_side * 950.0, -280.0)
+	_side = -1.0 if from_left else 1.0
+	sync_to_physics = true
+	cshape = CollisionShape2D.new()
+	var box := RectangleShape2D.new()
+	box.size = Vector2(34, 24)
+	cshape.shape = box
+	cshape.disabled = true                # 로밍 중엔 충돌 없음
+	add_child(cshape)
+	position = _anchor() + Vector2(-_side * 1000.0, -340.0)
+	roam_target = _roam_pick()
+	s = S.FLY_IN
 
 
-func _perch_world() -> Vector2:
-	if not is_instance_valid(target_block):
-		return position
-	return target_block.global_position + Vector2(
-		_side * target_block.block_size.x * 0.28,
-		-target_block.block_size.y * 0.5 - 13.0)
+func _anchor() -> Vector2:
+	if is_instance_valid(target_block):
+		return target_block.global_position + Vector2(0, -target_block.block_size.y * 0.5)
+	return position
 
 
-func _physics_process(delta: float) -> void:
-	flap += delta * 16.0
-	match state:
-		State.FLY_IN:
+func _roam_pick() -> Vector2:
+	return _anchor() + Vector2(randf_range(-220, 220), randf_range(-260, -70))
+
+
+func _perch_point() -> Vector2:
+	if is_instance_valid(target_block):
+		return target_block.global_position + Vector2(
+			_side * target_block.block_size.x * 0.30,
+			-target_block.block_size.y * 0.5 - 12.0)
+	return position
+
+
+func _physics_process(dt: float) -> void:
+	t += dt
+	flap += dt * 18.0
+	match s:
+		S.FLY_IN:
+			position = position.lerp(roam_target, 0.05)
+			if position.distance_to(roam_target) < 45.0:
+				s = S.ROAM
+				timer = randf_range(3.0, 6.0)
+		S.ROAM:
+			position = position.lerp(roam_target, 0.04)
+			position.y += sin(t * 3.0) * 0.7
+			if position.distance_to(roam_target) < 60.0:
+				roam_target = _roam_pick()
+			timer -= dt
+			if timer <= 0.0:
+				s = S.PERCH
+				timer = randf_range(3.5, 6.5)
+				cshape.disabled = false        # 앉으면 물리 충돌 켜짐
+		S.PERCH:
 			if not is_instance_valid(target_block):
 				_leave()
 			else:
-				var tgt := _perch_world()
-				position = position.lerp(tgt, 0.06)
-				if position.distance_to(tgt) < 10.0:
-					state = State.PERCH
-					timer = randf_range(2.5, 5.0)
-		State.PERCH:
-			if not is_instance_valid(target_block):
-				_leave()
-			else:
-				position = _perch_world()
-				# 앉은 쪽에 아래로 힘 → 토크 → 그 쪽으로 미세하게 기욺
-				target_block.apply_force(Vector2(0, WEIGHT),
-					Vector2(_side * target_block.block_size.x * 0.28, 0))
-				timer -= delta
+				position = position.lerp(_perch_point(), 0.25)
+				timer -= dt
 				if timer <= 0.0:
 					_leave()
-		State.FLY_OUT:
-			position += vel * delta
-			timer -= delta
+		S.FLY_OUT:
+			timer -= dt
+			if timer > 1.6:
+				position += Vector2(0, -150) * dt      # 처음엔 위로 → 블록 들어올림
+			else:
+				if not cshape.disabled:
+					cshape.disabled = true
+				position += vel * dt
 			if timer <= 0.0:
 				queue_free()
 	queue_redraw()
 
 
 func _leave() -> void:
-	if state == State.FLY_OUT:
+	if s == S.FLY_OUT:
 		return
-	state = State.FLY_OUT
-	vel = Vector2(_side * 280.0, -240.0)
-	timer = 2.2
+	s = S.FLY_OUT
+	timer = 2.0
+	vel = Vector2(_side * 320.0, -280.0)
 	left.emit()
 
 
 func _draw() -> void:
-	var col := Color(0.13, 0.13, 0.18)
-	var w := sin(flap) * 11.0
-	draw_line(Vector2(0, -2), Vector2(-15, -2 - w), col, 3.0)   # 날개
-	draw_line(Vector2(0, -2), Vector2(15, -2 - w), col, 3.0)
-	draw_circle(Vector2.ZERO, 8.5, col)                        # 몸통
-	draw_circle(Vector2(_side * 7.0, -4.0), 5.0, col)          # 머리
-	draw_line(Vector2(_side * 11.0, -4.0), Vector2(_side * 17.0, -3.0),
-		Color(0.95, 0.65, 0.2), 2.0)                          # 부리
+	var w := sin(flap) * 14.0
+	var c := body_col
+	draw_line(Vector2(0, -3), Vector2(-26, -3 - w), c, 5.0)     # 날개
+	draw_line(Vector2(0, -3), Vector2(26, -3 - w), c, 5.0)
+	draw_circle(Vector2.ZERO, 13.0, c)                          # 몸통
+	draw_circle(Vector2(_side * 10.0, -6.0), 8.0, c)            # 머리
+	draw_line(Vector2(_side * 17.0, -6.0), Vector2(_side * 27.0, -4.0),
+		Color(0.97, 0.72, 0.15), 3.5)                          # 부리
+	draw_circle(Vector2(_side * 12.0, -8.0), 2.2, Color(0.05, 0.05, 0.05))  # 눈

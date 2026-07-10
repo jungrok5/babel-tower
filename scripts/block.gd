@@ -56,23 +56,28 @@ func _on_body_entered(_body: Node) -> void:
 	landed.emit()
 
 
-## 착지 먼지 파티클 (타격감)
+## 착지 먼지 파티클 (타격감) — 블록 좌우 양끝(블록끼리 만나는 지점)에서 뿜는다
 func _spawn_dust() -> void:
+	for sx in [-1.0, 1.0]:
+		_dust_at(Vector2(sx * block_size.x * 0.5, block_size.y * 0.5), sx)
+
+
+func _dust_at(pos: Vector2, sx: float) -> void:
 	var p := CPUParticles2D.new()
-	p.position = Vector2(0, block_size.y * 0.5)   # 블록 아랫변
+	p.position = pos
 	p.emitting = true
 	p.one_shot = true
 	p.explosiveness = 0.9
-	p.amount = 14
+	p.amount = 10
 	p.lifetime = 0.5
-	p.direction = Vector2(0, -1)
-	p.spread = 70.0
-	p.gravity = Vector2(0, 500)
-	p.initial_velocity_min = 70.0
-	p.initial_velocity_max = 170.0
+	p.direction = Vector2(sx * 0.6, -1)     # 바깥+위로 퍼짐
+	p.spread = 55.0
+	p.gravity = Vector2(0, 520)
+	p.initial_velocity_min = 80.0
+	p.initial_velocity_max = 190.0
 	p.scale_amount_min = 2.0
 	p.scale_amount_max = 5.0
-	p.color = block_color.lightened(0.1)
+	p.color = block_color.lightened(0.12)
 	add_child(p)
 	get_tree().create_timer(1.2).timeout.connect(p.queue_free)
 

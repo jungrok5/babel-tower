@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v2.5 · sky"
+const GAME_VERSION := "v2.6 · sky2"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -21,6 +21,9 @@ const TILT_DEADZONE := 0.06         # 이보다 작은 기울기는 무시(미�
 const FLOOR_PIVOT := Vector2(BASE_X, GROUND_TOP_Y)    # 바닥 회전 피벗(토대 중심 바닥)
 const METERS_PER_BLOCK := 5                          # 블록 1개 = 몇 미터
 const MILESTONE_M := 50                              # 이 미터마다 돌파 이펙트
+const WIND_LOW := 120                                # 이 높이부터 바람 발생
+const WIND_HIGH := 600                               # 이 높이 위(성층권)는 무풍
+const WIND_ANGLE := 0.13                             # 최대 바람이 바닥을 미는 각도(rad)
 
 var state: int = State.CALIB
 var score: int = 0
@@ -37,7 +40,10 @@ var last_milestone := 0             # 마지막으로 돌파한 미터 구간
 var record_broken := false          # 이번 판에 최고기록을 깼는가
 var sky: Control                    # 높이별 하늘 배경
 var world_time := 0.0               # 구름/별 애니메이션용 시간
-var wind_phase := 0.0               # 바람 위상(물리)
+var wind_cur := 0.0                 # 현재 바람 세기(-1..1, 부호=방향)
+var wind_target := 0.0              # 목표 바람
+var wind_timer := 4.0               # 다음 상태 전환까지
+var wind_gusting := false           # 지금 부는 중인가
 var bird: Node2D = null             # 현재 날아다니는 새(1마리)
 var bird_timer := 8.0               # 다음 새까지
 var sfx := {}                       # 효과음 플레이어 모음
@@ -48,6 +54,7 @@ var ui: CanvasLayer
 var height_label: Label
 var best_label: Label
 var hint_label: Label
+var wind_label: Label
 var stab_fill: ColorRect
 var guides_group: Control
 var guide_btn: Button
@@ -297,7 +304,10 @@ func _restart() -> void:
 	aim_x = BASE_X
 	last_milestone = 0
 	record_broken = false
-	wind_phase = 0.0
+	wind_cur = 0.0
+	wind_target = 0.0
+	wind_gusting = false
+	wind_timer = randf_range(4.0, 8.0)
 	bird_timer = randf_range(6.0, 10.0)
 	if is_instance_valid(bird):
 		bird.queue_free()
@@ -353,10 +363,8 @@ func _physics_process(delta: float) -> void:
 	# 바닥이 수평이면 블록은 잠들어(sleep) 떨림이 없다. 기울면 경사 때문에 위 블록이 넘어진다.
 	var target_angle := _tilt_amount() * MAX_TILT_ANGLE
 	if state == State.READY:
-		# 고도에 따른 바람(돌풍) — 높을수록 바닥이 미세하게 흔들려 어려워진다
-		wind_phase += delta
-		var wind_str := clampf((float(_meters()) - 80.0) / 500.0, 0.0, 1.0) * 0.06
-		target_angle += (sin(wind_phase * 1.3) * 0.7 + sin(wind_phase * 0.5 + 1.0) * 0.3) * wind_str
+		_update_wind(delta)                 # 간헐적 돌풍(고도 구간에서만) → 바닥을 민다
+		target_angle += wind_cur * WIND_ANGLE
 	if is_instance_valid(floor_body):
 		floor_body.rotation = lerpf(floor_body.rotation, target_angle, 0.15)
 
@@ -395,6 +403,25 @@ func _on_bird_left() -> void:
 	bird_timer = randf_range(7.0, 13.0)
 
 
+## 간헐적 바람: 잠잠 ↔ 돌풍을 번갈아. 정해진 고도 구간에서만 실제로 분다.
+func _update_wind(dt: float) -> void:
+	var m := float(_meters())
+	var band := 0.0
+	if m > WIND_LOW and m < WIND_HIGH:
+		band = clampf(minf(m - WIND_LOW, WIND_HIGH - m) / 90.0, 0.0, 1.0)
+	wind_timer -= dt
+	if wind_timer <= 0.0:
+		if wind_gusting:
+			wind_gusting = false
+			wind_target = 0.0
+			wind_timer = randf_range(4.0, 8.0)        # 잠잠한 구간
+		else:
+			wind_gusting = true
+			wind_target = (1.0 if randf() < 0.5 else -1.0) * randf_range(0.55, 1.0)
+			wind_timer = randf_range(2.0, 4.5)        # 부는 구간
+	wind_cur = lerpf(wind_cur, wind_target * band, 0.05)
+
+
 ## 데드존을 적용한 기울기(작은 손떨림은 무시). -1..1
 func _tilt_amount() -> float:
 	if state != State.READY:
@@ -430,9 +457,12 @@ func _tower_top_edge() -> float:
 
 func _process(delta: float) -> void:
 	world_time += delta
+	if state != State.READY:
+		wind_cur = lerpf(wind_cur, 0.0, 0.05)   # 플레이 중이 아니면 바람 잦아듦
 	if sky != null:
 		sky.meters = float(_meters())
 		sky.t = world_time
+		sky.wind = wind_cur
 	if amb_wind != null:
 		var tv := lerpf(-60.0, -13.0, clampf((float(_meters()) - 60.0) / 500.0, 0.0, 1.0))
 		amb_wind.volume_db = lerpf(amb_wind.volume_db, tv, 0.04)
@@ -513,6 +543,17 @@ func _update_ui(delta: float) -> void:
 		stab_fill.size.x = 300.0 * clampf(1.0 - inst, 0.02, 1.0)
 		stab_fill.color = Color(0.32, 0.85, 0.45).lerp(Color(0.92, 0.26, 0.26), inst)
 
+	# 바람 표시 (방향 화살표 + 세기)
+	if absf(wind_cur) > 0.1:
+		var arrow := "▶" if wind_cur > 0.0 else "◀"
+		var n := clampi(int(absf(wind_cur) * 3.0) + 1, 1, 3)
+		wind_label.text = "바람 " + arrow.repeat(n)
+		wind_label.add_theme_color_override("font_color",
+			Color(0.7, 0.85, 1.0).lerp(Color(1.0, 0.5, 0.4), absf(wind_cur)))
+		wind_label.visible = true
+	else:
+		wind_label.visible = false
+
 	match state:
 		State.CALIB:
 			hint_label.text = ""
@@ -581,6 +622,14 @@ func _build_ui() -> void:
 	guide_btn.focus_mode = Control.FOCUS_NONE
 	guide_btn.pressed.connect(_toggle_guides)
 	ui.add_child(guide_btn)
+
+	# 바람 표시 (상단 중앙, 바람 불 때만)
+	wind_label = _make_label("", 32, Color(0.72, 0.86, 1.0))
+	wind_label.position = Vector2(90, 168)
+	wind_label.size = Vector2(540, 42)
+	wind_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	wind_label.visible = false
+	ui.add_child(wind_label)
 
 	# 하단 힌트
 	hint_label = _make_label("", 30, Color(0.78, 0.8, 0.88))
