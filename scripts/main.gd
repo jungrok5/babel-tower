@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v0.9 · stable"
+const GAME_VERSION := "v1.0 · tall"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -17,6 +17,7 @@ const TIP_ANGLE := 0.75             # 이 각도 이상 기울면 붕괴 (라디
 const COLLAPSE_FALL := 170.0        # 바닥 아래로 이만큼 떨어지면 붕괴
 const MAX_FLOOR_TILT := 0.7         # 기기를 최대로 기울였을 때 '바닥'이 기우는 각도(라디안)
 const GRAVITY_MAG := 1100.0         # 중력 크기 (블록에 직접 적용)
+const KEEP_DYNAMIC := 18            # 꼭대기 이 개수만 물리 활성, 그보다 깊으면 정적 고정
 
 var state: int = State.CALIB
 var score: int = 0
@@ -149,6 +150,16 @@ func _drop_block() -> void:
 	blocks.append(b)
 	score += 1
 
+	# 꼭대기 근처 KEEP_DYNAMIC개만 물리 활성 — 그보다 깊은 블록은 정적 고정한다.
+	# → 무한정 높이에서도 안정적이고, 폰에서 활성 강체 수가 제한돼 가볍다.
+	# (낮은 탑은 전부 동적이라 '탑 전체 기울임/회복' 감각은 그대로 유지)
+	var freeze_idx := blocks.size() - 1 - KEEP_DYNAMIC
+	if freeze_idx > 0 and is_instance_valid(blocks[freeze_idx]):
+		var fb: Block = blocks[freeze_idx]
+		if not fb.freeze:
+			fb.freeze = true
+			fb.freeze_mode = RigidBody2D.FREEZE_MODE_STATIC
+
 
 func _top_block() -> Block:
 	var top: Block = null
@@ -217,7 +228,7 @@ func _physics_process(delta: float) -> void:
 	# 코히런트한 힘이라 덜덜거림이 없고, 매 프레임 받으므로 블록이 잠들지 않는다.
 	var gdir := _gravity_dir()
 	for b in blocks:
-		if is_instance_valid(b):
+		if is_instance_valid(b) and not b.freeze:  # 정적 고정된 하단 블록은 건너뛴다
 			b.apply_central_force(gdir * GRAVITY_MAG * b.mass)
 
 	if state == State.CALIB or state == State.OVER:
@@ -229,7 +240,7 @@ func _physics_process(delta: float) -> void:
 func _check_collapse() -> void:
 	var collapse_y := GROUND_TOP_Y + COLLAPSE_FALL
 	for b in blocks:
-		if not is_instance_valid(b):
+		if not is_instance_valid(b) or b.freeze:  # 고정된 하단은 무너지지 않는다
 			continue
 		if absf(b.rotation) > TIP_ANGLE:
 			_game_over()
