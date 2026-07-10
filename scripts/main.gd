@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v1.2 · calm"
+const GAME_VERSION := "v2.0 · floor"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -15,8 +15,8 @@ const BLOCK_SIZE := Vector2(180.0, 62.0)
 const DROP_HEIGHT := 150.0          # 다음 벽돌이 떨어지기 시작하는 높이(짧게 = 연사 쌓기 쾌감)
 const TIP_ANGLE := 0.75             # 이 각도 이상 기울면 붕괴 (라디안)
 const COLLAPSE_FALL := 170.0        # 바닥 아래로 이만큼 떨어지면 붕괴
-const MAX_FLOOR_TILT := 0.7         # 기기를 최대로 기울였을 때 '바닥'이 기우는 각도(라디안)
-const GRAVITY_MAG := 1100.0         # 중력 크기
+const FLOOR_RANGE := 320.0          # 최대 기울임에서 바닥이 중심에서 좌우로 이동하는 거리(px)
+const FOUNDATION_TOP := GROUND_TOP_Y - BLOCK_SIZE.y   # 토대 윗면 Y
 const TILT_DEADZONE := 0.08         # 이보다 작은 기울기는 무시(미세 손떨림 → 떨림 방지)
 
 var state: int = State.CALIB
@@ -25,9 +25,10 @@ var blocks: Array[Block] = []
 var calib_timer: float = 0.0
 var go_shake: float = 0.0           # 붕괴 순간의 카메라 흔들림 버스트
 var web_permission_asked := false
-var gravity_area: Area2D            # 이 영역의 중력 방향을 기기 기울기로 회전시킨다
+var floor_body: AnimatableBody2D    # 센서에 따라 좌우로 움직이는 물리 바닥(+토대)
 var aiming := false                 # 손을 대고 위치를 조준 중인가
 var aim_x := BASE_X                 # 떨어뜨릴 가로 위치(월드 좌표)
+var drag_start_world := 0.0         # 드래그 시작 지점(상대 이동 기준)
 
 var cam: Camera2D
 var ui: CanvasLayer
@@ -51,49 +52,40 @@ func _ready() -> void:
 	_begin_calibration()
 
 
-## 데드존을 적용한 기울기 (작은 손떨림은 0으로 무시). -1..1
-func _tilt_amount() -> float:
-	if state != State.READY:
-		return 0.0
-	var raw := Motion.get_sway()
-	if absf(raw) <= TILT_DEADZONE:
-		return 0.0
-	return signf(raw) * (absf(raw) - TILT_DEADZONE) / (1.0 - TILT_DEADZONE)
-
-
 # ---------------------------------------------------------------- 월드 구성
 
 func _build_world() -> void:
-	# 중력 영역 — 기기 기울기만큼 '아래' 방향을 회전시킨다(엔진 중력 사용 → 안착이 깔끔).
-	gravity_area = Area2D.new()
-	gravity_area.gravity_space_override = Area2D.SPACE_OVERRIDE_REPLACE
-	gravity_area.gravity_point = false
-	gravity_area.gravity = GRAVITY_MAG
-	gravity_area.gravity_direction = Vector2(0, 1)
-	gravity_area.priority = 10
-	var acs := CollisionShape2D.new()
-	var arect := RectangleShape2D.new()
-	arect.size = Vector2(16000, 200000)   # 매우 높은 탑까지 덮는다
-	acs.shape = arect
-	gravity_area.add_child(acs)
-	gravity_area.position = Vector2(BASE_X, GROUND_TOP_Y - 90000.0)
-	add_child(gravity_area)
+	# 센서에 따라 좌우로 움직이는 물리 바닥(AnimatableBody2D). 중력은 항상 아래로 고정.
+	# 위 블록들은 이 바닥과의 마찰/관성으로만 반응한다(= 쟁반을 좌우로 미는 것).
+	floor_body = AnimatableBody2D.new()
+	floor_body.sync_to_physics = true
+	var fmat := PhysicsMaterial.new()
+	fmat.friction = 0.9
+	fmat.bounce = 0.0
+	floor_body.physics_material_override = fmat
 
-	# 바닥
-	var ground := StaticBody2D.new()
-	ground.position = Vector2(BASE_X, GROUND_TOP_Y + 100.0)
-	var gshape := RectangleShape2D.new()
-	gshape.size = Vector2(2400.0, 200.0)
+	# 바닥판(콜리전 + 비주얼)
 	var gcs := CollisionShape2D.new()
+	var gshape := RectangleShape2D.new()
+	gshape.size = Vector2(3200.0, 200.0)
 	gcs.shape = gshape
-	ground.add_child(gcs)
-	var gvis := Polygon2D.new()
-	gvis.polygon = PackedVector2Array([
-		Vector2(-1200, -100), Vector2(1200, -100),
-		Vector2(1200, 100), Vector2(-1200, 100)])
-	gvis.color = Color(0.12, 0.13, 0.18)
-	ground.add_child(gvis)
-	add_child(ground)
+	gcs.position = Vector2(BASE_X, GROUND_TOP_Y + 100.0)
+	floor_body.add_child(gcs)
+	floor_body.add_child(_make_rect_poly(
+		Vector2(BASE_X, GROUND_TOP_Y + 100.0), Vector2(3200.0, 200.0),
+		Color(0.12, 0.13, 0.18)))
+
+	# 초석(토대) — 바닥의 일부로 함께 움직인다
+	var fcs := CollisionShape2D.new()
+	var fshape := RectangleShape2D.new()
+	fshape.size = BLOCK_SIZE
+	fcs.shape = fshape
+	fcs.position = Vector2(BASE_X, GROUND_TOP_Y - BLOCK_SIZE.y * 0.5)
+	floor_body.add_child(fcs)
+	floor_body.add_child(_make_rect_poly(
+		Vector2(BASE_X, GROUND_TOP_Y - BLOCK_SIZE.y * 0.5), BLOCK_SIZE, _brick_color(0)))
+
+	add_child(floor_body)
 
 	# 카메라
 	cam = Camera2D.new()
@@ -103,14 +95,17 @@ func _build_world() -> void:
 	add_child(cam)
 	cam.make_current()
 
-	# 초석 (첫 벽돌) — 점수에 포함되지 않는 토대
-	var base := _make_block(0)
-	base.position = Vector2(BASE_X, GROUND_TOP_Y - BLOCK_SIZE.y * 0.5 - 1.0)
-	add_child(base)
-	# 토대는 정적으로 고정 — 탑이 밑에서부터 주저앉는 것을 막는다
-	base.freeze = true
-	base.freeze_mode = RigidBody2D.FREEZE_MODE_STATIC
-	blocks.append(base)
+
+## 사각형 Polygon2D 생성 헬퍼(중심/크기/색)
+func _make_rect_poly(center: Vector2, size: Vector2, color: Color) -> Polygon2D:
+	var p := Polygon2D.new()
+	var hw := size.x * 0.5
+	var hh := size.y * 0.5
+	p.polygon = PackedVector2Array([
+		center + Vector2(-hw, -hh), center + Vector2(hw, -hh),
+		center + Vector2(hw, hh), center + Vector2(-hw, hh)])
+	p.color = color
+	return p
 
 
 func _make_block(level: int) -> Block:
@@ -157,11 +152,8 @@ func _on_sensor_enable() -> void:
 
 ## 지정한 가로 위치(at_x) 위에서 벽돌을 떨어뜨린다. 안착을 기다리지 않아 연사 가능.
 func _drop_block(at_x: float = BASE_X) -> void:
-	var top := _top_block()
-	var sy := GROUND_TOP_Y - BLOCK_SIZE.y * 0.5 - DROP_HEIGHT
-	if top != null:
-		# 세로는 항상 탑 꼭대기 위에서 낙하 (가로는 손 뗀 위치)
-		sy = top.position.y - top.block_size.y * 0.5 - DROP_HEIGHT
+	# 세로는 항상 탑 꼭대기 위에서 낙하 (가로는 손 뗀 위치)
+	var sy := _tower_top_edge() - BLOCK_SIZE.y * 0.5 - DROP_HEIGHT
 	var b := _make_block(score + 1)
 	b.position = Vector2(at_x, sy)
 	add_child(b)
@@ -199,14 +191,8 @@ func _restart() -> void:
 	cam.offset = Vector2.ZERO
 	cam.zoom = Vector2.ONE
 	cam.position = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
-
-	var base := _make_block(0)
-	base.position = Vector2(BASE_X, GROUND_TOP_Y - BLOCK_SIZE.y * 0.5 - 1.0)
-	add_child(base)
-	# 토대는 정적으로 고정 — 탑이 밑에서부터 주저앉는 것을 막는다
-	base.freeze = true
-	base.freeze_mode = RigidBody2D.FREEZE_MODE_STATIC
-	blocks.append(base)
+	if is_instance_valid(floor_body):
+		floor_body.position = Vector2.ZERO   # 바닥을 중앙으로 (토대는 바닥의 일부라 유지됨)
 
 	over_panel.visible = false
 	state = State.READY
@@ -215,8 +201,8 @@ func _restart() -> void:
 # ---------------------------------------------------------------- 입력
 
 func _unhandled_input(event: InputEvent) -> void:
-	# 드래그해서 놓기: 누르는 순간부터 조준, 좌우로 끌어 위치를 정하고, 떼면 낙하.
-	# 터치는 emulate_mouse_from_touch로 마우스 이벤트가 되므로 마우스 이벤트로 처리.
+	# 어디를 눌러도 벽돌은 '중앙'에서 시작. 누른 지점 기준으로 좌우로 끌면 그만큼 이동,
+	# 떼면 낙하. (터치는 emulate_mouse_from_touch로 마우스 이벤트가 된다)
 	if event is InputEventKey:
 		if event.pressed and not event.echo and event.keycode == KEY_SPACE and state == State.READY:
 			_drop_block(_clamp_aim(BASE_X))
@@ -226,13 +212,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.pressed:
 			if state == State.READY:
 				aiming = true
-				aim_x = _clamp_aim(_screen_to_world_x(event.position))
+				drag_start_world = _screen_to_world_x(event.position)
+				aim_x = BASE_X                     # 무조건 중앙에서 시작
 		else:  # 손을 뗌 → 그 위치에 낙하
 			if aiming and state == State.READY:
 				_drop_block(aim_x)
 			aiming = false
 	elif aiming and (event is InputEventMouseMotion or event is InputEventScreenDrag):
-		aim_x = _clamp_aim(_screen_to_world_x(event.position))
+		# 누른 지점 대비 이동량만큼 중앙에서 좌우로
+		aim_x = _clamp_aim(BASE_X + _screen_to_world_x(event.position) - drag_start_world)
 
 
 func _screen_to_world_x(screen_pos: Vector2) -> float:
@@ -246,18 +234,12 @@ func _clamp_aim(x: float) -> float:
 # ---------------------------------------------------------------- 물리
 
 func _physics_process(_delta: float) -> void:
-	# 기기 기울기만큼 중력 영역의 '아래' 방향을 회전. 엔진 중력을 쓰므로 블록은
-	# 가만히 있으면 잠들어(sleep) 물리가 손대지 않는다 → 떨림 0.
-	var tilt := _tilt_amount()
-	var theta := tilt * MAX_FLOOR_TILT
-	if is_instance_valid(gravity_area):
-		gravity_area.gravity_direction = Vector2(sin(theta), cos(theta))
-
-	# 기울이는 중일 때만 블록을 깨워 반응시킨다. 수평이면 그대로 잠들어 안정.
-	if absf(tilt) > 0.0:
-		for b in blocks:
-			if is_instance_valid(b) and not b.freeze:
-				b.sleeping = false
+	# 센서 기울기만큼 바닥을 중심 기준 좌우로 이동시킨다. 중력은 항상 아래로 고정이므로
+	# 바닥이 멈추면 블록은 그대로 잠들어(sleep) 떨림이 없다. 바닥이 움직이면 마찰/관성으로
+	# 위 블록들이 끌려가고, 급격히 움직이면 꼭대기부터 무너진다.
+	var target_x := _tilt_amount() * FLOOR_RANGE
+	if is_instance_valid(floor_body):
+		floor_body.position.x = lerpf(floor_body.position.x, target_x, 0.18)
 
 	if state == State.CALIB or state == State.OVER:
 		return
@@ -265,10 +247,20 @@ func _physics_process(_delta: float) -> void:
 	_check_collapse()
 
 
+## 데드존을 적용한 기울기(작은 손떨림은 무시). -1..1
+func _tilt_amount() -> float:
+	if state != State.READY:
+		return 0.0
+	var raw := Motion.get_sway()
+	if absf(raw) <= TILT_DEADZONE:
+		return 0.0
+	return signf(raw) * (absf(raw) - TILT_DEADZONE) / (1.0 - TILT_DEADZONE)
+
+
 func _check_collapse() -> void:
 	var collapse_y := GROUND_TOP_Y + COLLAPSE_FALL
 	for b in blocks:
-		if not is_instance_valid(b) or b.freeze:  # 고정된 하단은 무너지지 않는다
+		if not is_instance_valid(b):
 			continue
 		if absf(b.rotation) > TIP_ANGLE:
 			_game_over()
@@ -279,7 +271,7 @@ func _check_collapse() -> void:
 
 
 func _tower_top_edge() -> float:
-	var top := GROUND_TOP_Y
+	var top := FOUNDATION_TOP   # 블록이 없으면 토대 윗면
 	for b in blocks:
 		if is_instance_valid(b):
 			top = minf(top, b.position.y - b.block_size.y * 0.5)
@@ -358,7 +350,7 @@ func _update_ui(delta: float) -> void:
 					state = State.READY
 				calib_label.text = "가장 편안한 자세로\n기기를 잡으세요\n\n· 보정 중 ·"
 		State.READY:
-			hint_label.text = "누른 채 좌우로 움직여 위치를 정하고 떼면 떨어집니다\n기기를 수평으로 — 기울면 탑이 쏠립니다"
+			hint_label.text = "눌러서 좌우로 끌어 위치를 정하고 떼면 떨어집니다\n기기를 수평으로 — 기울이면 바닥이 움직여 탑이 쏠립니다"
 		State.OVER:
 			hint_label.text = ""
 
