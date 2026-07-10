@@ -25,7 +25,7 @@ func setup(block: Block, from_left: bool) -> void:
 	sync_to_physics = true
 	cshape = CollisionShape2D.new()
 	var box := RectangleShape2D.new()
-	box.size = Vector2(34, 24)
+	box.size = Vector2(30, 14)      # 바닥면이 블록 윗면에 딱 맞아 밀어내지 않음
 	cshape.shape = box
 	cshape.disabled = true                # 로밍 중엔 충돌 없음
 	add_child(cshape)
@@ -48,7 +48,7 @@ func _perch_point() -> Vector2:
 	if is_instance_valid(target_block):
 		return target_block.global_position + Vector2(
 			_side * target_block.block_size.x * 0.30,
-			-target_block.block_size.y * 0.5 - 12.0)
+			-target_block.block_size.y * 0.5 - 7.0)   # 블록 윗면에 앉음
 	return position
 
 
@@ -74,9 +74,10 @@ func _physics_process(dt: float) -> void:
 				_leave()
 			else:
 				var pp := _perch_point()
-				position = position.lerp(pp, 0.12)
-				if position.distance_to(pp) < 9.0:
+				position = position.lerp(pp, 0.16)
+				if position.distance_to(pp) < 14.0:
 					# 자리에 도착한 뒤에야 충돌을 켠다 → 탑을 들이받지 않음
+					position = pp
 					cshape.disabled = false
 					s = S.PERCH
 					timer = randf_range(3.5, 6.5)
@@ -84,7 +85,7 @@ func _physics_process(dt: float) -> void:
 			if not is_instance_valid(target_block):
 				_leave()
 			else:
-				position = position.lerp(_perch_point(), 0.15)   # 살살 따라감
+				position = position.lerp(_perch_point(), 0.4)   # 자리에 딱 붙어 앉음
 				timer -= dt
 				if timer <= 0.0:
 					_leave()

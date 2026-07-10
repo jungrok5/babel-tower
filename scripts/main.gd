@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v2.7 · tune"
+const GAME_VERSION := "v2.8 · fall"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -379,6 +379,11 @@ func _physics_process(delta: float) -> void:
 
 func _update_birds(delta: float) -> void:
 	if bird != null:
+		# 아직 안 앉았으면(FLY_IN/ROAM/APPROACH) 항상 '현재 꼭대기'로 목표 갱신
+		if int(bird.s) <= 2:
+			var tb := _top_block()
+			if tb != null:
+				bird.target_block = tb
 		return
 	bird_timer -= delta
 	if bird_timer <= 0.0:
@@ -435,14 +440,12 @@ func _tilt_amount() -> float:
 
 
 func _check_collapse() -> void:
-	var collapse_y := GROUND_TOP_Y + COLLAPSE_FALL
+	# 붕괴 판정 = '블록이 바닥(지면)에 닿음'. 기울어져 있어도 안 떨어졌으면 살아있다.
+	# 제대로 쌓인 블록은 토대 위(높은 위치)에 있고, 떨어진 블록만 지면 높이로 내려온다.
 	for b in blocks:
 		if not is_instance_valid(b):
 			continue
-		if absf(b.rotation) > TIP_ANGLE:
-			_game_over()
-			return
-		if b.global_position.y > collapse_y:
+		if b.global_position.y + b.block_size.y * 0.5 > GROUND_TOP_Y - 6.0:
 			_game_over()
 			return
 
