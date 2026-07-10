@@ -1,0 +1,40 @@
+; Engine configuration file.
+; Babel Tower — "정지(Stillness)" 메카닉 기반 바벨탑 스택 게임
+; Godot 4.7
+
+config_version=5
+
+[application]
+
+config/name="Babel Tower"
+config/description="기기를 최대한 움직이지 않고 탑을 쌓는 인내의 게임. 손이 떨리는 순간, 탑은 무너진다."
+run/main_scene="res://scenes/Main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://icon.svg"
+
+[autoload]
+
+Motion="*res://scripts/motion_sensor.gd"
+Graveyard="*res://scripts/graveyard.gd"
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+window/handheld/orientation=1
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
+
+[physics]
+
+2d/default_gravity=1100.0
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.055, 0.06, 0.09, 1)

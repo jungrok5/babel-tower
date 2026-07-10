@@ -1,0 +1,10 @@
+# Godot 4+
+.godot/
+/android/
+/build/
+export.cfg
+*.tmp
+
+# macOS / editors
+.DS_Store
+*.swp

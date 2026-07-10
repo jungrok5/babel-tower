@@ -1,0 +1,77 @@
+name: Deploy Web Build to GitHub Pages
+
+# 웹 익스포트를 자동화해 GitHub Pages에서 바로 테스트할 수 있게 한다.
+# Settings → Pages → Source 를 "GitHub Actions"로 설정하면 활성화됨.
+
+on:
+  push:
+    branches:
+      - main
+      - claude/stillness-tower-game-tccfaj
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.7"          # 필요 시 여기만 바꿔 버전 업그레이드
+  GODOT_RELEASE: "stable"
+
+jobs:
+  export-web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Godot headless + export templates
+        run: |
+          BASE="https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-${GODOT_RELEASE}"
+          EDITOR="Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_linux.x86_64"
+          TEMPLATES="Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_export_templates.tpz"
+
+          curl -L -o godot.zip "${BASE}/${EDITOR}.zip"
+          unzip -o godot.zip
+          mv "${EDITOR}" godot
+          chmod +x godot
+
+          curl -L -o templates.tpz "${BASE}/${TEMPLATES}"
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_RELEASE}"
+          unzip -o templates.tpz -d templates_extract
+          mv templates_extract/templates/* \
+             "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_RELEASE}/"
+
+      - name: Import project
+        run: |
+          # 첫 임포트로 .godot 캐시/리소스 생성 (한 번은 실패 코드가 나올 수 있어 || true)
+          ./godot --headless --import . || true
+
+      - name: Export Web build
+        run: |
+          mkdir -p build/web
+          ./godot --headless --export-release "Web" build/web/index.html
+          # GitHub Pages가 Jekyll로 처리하지 않도록
+          touch build/web/.nojekyll
+          ls -la build/web
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: export-web
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
