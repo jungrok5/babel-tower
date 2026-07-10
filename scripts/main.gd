@@ -20,6 +20,7 @@ var current: Block = null
 var settle_timer: float = 0.0
 var calib_timer: float = 0.0
 var go_shake: float = 0.0           # 붕괴 순간의 카메라 흔들림 버스트
+var sway_phase: float = 0.0         # 탑 전체가 한 몸처럼 출렁이는 흔들림 위상
 var web_permission_asked := false
 
 var cam: Camera2D
@@ -195,17 +196,23 @@ func _physics_process(delta: float) -> void:
 	if state == State.CALIB or state == State.OVER:
 		return
 
-	var sway := Motion.get_sway()
-	var shake := Motion.get_shake()
+	var sway := Motion.get_sway()      # 기울인 방향 (-1..1)
+	var shake := Motion.get_shake()    # 움직임 세기 (0..1)
 
-	# 손떨림을 탑에 전달 — 위로 갈수록 지렛대 효과로 크게 흔들린다
+	# 흔들림은 탑 '전체'가 한 위상으로 출렁이게 한다 (블록별 랜덤 = 달달거림 → 제거).
+	# 빠르게 움직일수록 출렁임의 진동수/진폭이 커진다.
+	sway_phase += delta * (10.0 + shake * 26.0)
+	var wobble := sin(sway_phase) * shake
+
+	# 기울인 쪽으로 탑이 '기운다'. 위로 갈수록 지렛대 효과로 크게 쏠린다.
 	for i in blocks.size():
+		if i == 0:
+			continue  # 초석(토대)은 고정 — 스웨이는 그 위 스택에서 나온다
 		var b := blocks[i]
 		if not is_instance_valid(b):
 			continue
-		var lever := 1.0 + float(i) * 0.20
-		var fx := sway * 950.0 * lever
-		fx += (randf() * 2.0 - 1.0) * shake * 1700.0 * lever
+		var lever := 1.0 + float(i) * 0.22
+		var fx := (sway * 1500.0 + wobble * 900.0) * lever
 		b.apply_central_force(Vector2(fx, 0.0))
 
 	# 떨어지는 벽돌이 안정되면 다음 차례로
