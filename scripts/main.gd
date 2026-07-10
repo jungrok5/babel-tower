@@ -4,15 +4,15 @@ extends Node2D
 ## 핵심 규칙: 기기를 최대한 움직이지 마라.
 ## 흔들리면 탑이 요동치고, 높이 올라갈수록 작은 떨림도 치명적이 된다.
 
-enum State { CALIB, READY, DROPPING, OVER }
+enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v0.6 · tilt-floor"
+const GAME_VERSION := "v0.7 · rapid"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
 const BLOCK_SIZE := Vector2(180.0, 62.0)
-const DROP_HEIGHT := 240.0          # 다음 벽돌이 나타나는 높이
+const DROP_HEIGHT := 150.0          # 다음 벽돌이 떨어지기 시작하는 높이(짧게 = 연사 쌓기 쾌감)
 const TIP_ANGLE := 0.75             # 이 각도 이상 기울면 붕괴 (라디안)
 const COLLAPSE_FALL := 170.0        # 바닥 아래로 이만큼 떨어지면 붕괴
 const MAX_FLOOR_TILT := 0.7         # 기기를 최대로 기울였을 때 '바닥'이 기우는 각도(라디안)
@@ -21,8 +21,6 @@ const GRAVITY_MAG := 1100.0         # 중력 크기 (블록에 직접 적용)
 var state: int = State.CALIB
 var score: int = 0
 var blocks: Array[Block] = []
-var current: Block = null
-var settle_timer: float = 0.0
 var calib_timer: float = 0.0
 var go_shake: float = 0.0           # 붕괴 순간의 카메라 흔들림 버스트
 var web_permission_asked := false
@@ -51,7 +49,7 @@ func _ready() -> void:
 
 ## 현재 상태에 맞는 '아래' 방향. 플레이 중엔 기기 기울기만큼 회전한다.
 func _gravity_dir() -> Vector2:
-	if state == State.READY or state == State.DROPPING:
+	if state == State.READY:
 		var theta := clampf(Motion.get_sway(), -1.0, 1.0) * MAX_FLOOR_TILT
 		return Vector2(sin(theta), cos(theta))  # (0,1) = 화면 아래
 	return Vector2(0, 1)  # 보정/게임오버: 수평(잔해는 똑바로 낙하)
@@ -133,29 +131,34 @@ func _on_sensor_enable() -> void:
 	_start_calibration_countdown()
 
 
+## 탭 즉시 다음 벽돌을 떨어뜨린다. 안착을 기다리지 않으므로 파파파팍 연사 가능.
 func _drop_block() -> void:
+	var top := _top_block()
+	var sx := BASE_X
+	var sy := GROUND_TOP_Y - BLOCK_SIZE.y * 0.5 - DROP_HEIGHT
+	if top != null:
+		# 기울어 있어도 탑 꼭대기 바로 위에 떨어뜨린다
+		sx = top.position.x
+		sy = top.position.y - top.block_size.y * 0.5 - DROP_HEIGHT
 	var b := _make_block(score + 1)
-	var top_edge := _tower_top_edge()
-	# 흔들리는 상태로 탭하면 벽돌이 삐뚤게 놓인다 — 정지에 대한 보상
-	b.position = Vector2(BASE_X + Motion.get_sway() * 55.0, top_edge - DROP_HEIGHT)
+	b.position = Vector2(sx, sy)
 	add_child(b)
 	blocks.append(b)
-	current = b
-	settle_timer = 0.0
-	state = State.DROPPING
-
-
-func _on_block_settled() -> void:
 	score += 1
-	current = null
-	state = State.READY
+
+
+func _top_block() -> Block:
+	var top: Block = null
+	for b in blocks:
+		if is_instance_valid(b) and (top == null or b.position.y < top.position.y):
+			top = b
+	return top
 
 
 func _game_over() -> void:
 	if state == State.OVER:
 		return
 	state = State.OVER
-	current = null
 	go_shake = 26.0
 	Input.vibrate_handheld(400)         # 붕괴의 햅틱
 	Graveyard.add_record(score)
@@ -167,7 +170,6 @@ func _restart() -> void:
 		if is_instance_valid(b):
 			b.queue_free()
 	blocks.clear()
-	current = null
 	score = 0
 	cam.offset = Vector2.ZERO
 	cam.zoom = Vector2.ONE
@@ -216,16 +218,6 @@ func _physics_process(delta: float) -> void:
 	if state == State.CALIB or state == State.OVER:
 		return
 
-	# 떨어지는 벽돌이 안정되면 다음 차례로
-	if state == State.DROPPING and is_instance_valid(current):
-		if current.linear_velocity.length() < 22.0 \
-				and absf(current.angular_velocity) < 0.25:
-			settle_timer += delta
-			if settle_timer > 0.35:
-				_on_block_settled()
-		else:
-			settle_timer = 0.0
-
 	_check_collapse()
 
 
@@ -245,7 +237,7 @@ func _check_collapse() -> void:
 func _tower_top_edge() -> float:
 	var top := GROUND_TOP_Y
 	for b in blocks:
-		if is_instance_valid(b) and b != current:
+		if is_instance_valid(b):
 			top = minf(top, b.position.y - b.block_size.y * 0.5)
 	return top
 
@@ -296,9 +288,7 @@ func _update_ui(delta: float) -> void:
 					state = State.READY
 				calib_label.text = "가장 편안한 자세로\n기기를 잡으세요\n\n· 보정 중 ·"
 		State.READY:
-			hint_label.text = "화면을 탭하면 벽돌이 쌓입니다\n기기를 수평으로 유지하세요 — 기울면 탑이 쏠립니다"
-		State.DROPPING:
-			hint_label.text = "숨을 참으세요…  수평 유지"
+			hint_label.text = "탭해서 계속 쌓으세요\n기기를 수평으로 — 기울면 탑이 쏠립니다"
 		State.OVER:
 			hint_label.text = ""
 

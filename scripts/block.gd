@@ -22,11 +22,14 @@ func _ready() -> void:
 
 	var mat := PhysicsMaterial.new()
 	# 마찰을 낮춰 기울일 때 스택이 '스르륵' 쏠려 보이게 한다(너무 높으면 뻣뻣하다 갑자기 붕괴).
-	mat.friction = 0.45
+	mat.friction = 0.5
 	mat.bounce = 0.0
 	physics_material_override = mat
 
 	mass = 2.0
+	# 댐핑으로 미세 진동을 가라앉혀 '묵직한 돌' 느낌을 준다(덜덜거림 감소).
+	linear_damp = 0.7
+	angular_damp = 1.4
 	# 중력은 main이 매 프레임 '기울인 방향'으로 직접 넣는다(gravity_scale=0).
 	# 이렇게 하면 블록이 잠들지 않고 기울기에 계속 반응한다.
 	gravity_scale = 0.0
