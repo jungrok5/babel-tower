@@ -17,17 +17,19 @@ func _ready() -> void:
 	print("[TEST] READY after %d frames (state=%d)" % [t, int(main.state)])
 
 	var collapsed_at := -1
-	for i in range(30):
+	for i in range(200):
 		if int(main.state) != 1:
 			break
 		main._drop_block()
-		for j in range(16):          # 낙하/안착 시간
+		for j in range(14):          # 낙하/안착 시간
 			await get_tree().physics_frame
 		var mr := _maxrot(main)
-		print("[TEST] drop=%2d blocks=%2d state=%d maxrot=%.3f" % [
-			int(main.score), main.blocks.size(), int(main.state), mr])
+		if int(main.score) % 10 == 0 or int(main.state) == 2:
+			print("[TEST] drop=%3d blocks=%3d state=%d maxrot=%.3f" % [
+				int(main.score), main.blocks.size(), int(main.state), mr])
 		if int(main.state) == 2 and collapsed_at < 0:
 			collapsed_at = int(main.score)
+			break
 
 	# 마지막으로 오래 두고 스스로 무너지는지 확인
 	for j in range(300):
