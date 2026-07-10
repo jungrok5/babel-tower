@@ -32,7 +32,28 @@ func _ready() -> void:
 			print("[TEST] --> 붕괴")
 			break
 
+	# 극단적으로 기울인 채 오래 유지 → 블록이 실제로 바닥에 떨어지면 붕괴해야 한다.
+	# (기울기만으로 죽는 게 아니라 '블록이 지면에 닿을 때' 붕괴하는지 확인)
+	if int(main.state) != 2:
+		Motion._sway = 1.0
+		var frames := 0
+		while int(main.state) != 2 and frames < 1200:
+			await get_tree().physics_frame
+			frames += 1
+		print("[TEST] HOLD sway=1.00  frames=%d  min_block_y=%.0f  ground_y=%.0f  state=%d" % [
+			frames, _min_block_y(), main.GROUND_TOP_Y, int(main.state)])
+		print("[TEST] --> 붕괴" if int(main.state) == 2 else "[TEST] --> 유지(붕괴 없음)")
+
 	get_tree().quit()
+
+
+func _min_block_y() -> float:
+	# 가장 아래로 내려간 블록의 아랫변 y (지면에 가까운 정도)
+	var m := -1e9
+	for b in main.blocks:
+		if is_instance_valid(b):
+			m = maxf(m, b.global_position.y + b.block_size.y * 0.5)
+	return m
 
 
 func _build_to(n: int) -> void:
