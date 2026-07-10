@@ -34,6 +34,7 @@ var calib_button: Button
 var awaiting_sensor: bool = false
 var over_panel: Control
 var over_body: VBoxContainer
+var ui_font: Font
 
 
 func _ready() -> void:
@@ -296,6 +297,9 @@ func _update_ui(delta: float) -> void:
 # ---------------------------------------------------------------- UI 구성
 
 func _build_ui() -> void:
+	# 한글 글리프가 포함된 폰트 (기본 폰트엔 한글이 없어 '두부'로 깨진다)
+	ui_font = load("res://fonts/NanumGothic-Regular.ttf")
+
 	ui = CanvasLayer.new()
 	add_child(ui)
 
@@ -351,6 +355,8 @@ func _build_calib_panel() -> void:
 
 	calib_button = Button.new()
 	calib_button.text = "센서 켜기 ▶"
+	if ui_font:
+		calib_button.add_theme_font_override("font", ui_font)
 	calib_button.add_theme_font_size_override("font_size", 40)
 	calib_button.custom_minimum_size = Vector2(320, 96)
 	calib_button.visible = false
@@ -401,6 +407,8 @@ func _show_game_over() -> void:
 	over_body.add_child(_spacer(20))
 	var retry := Button.new()
 	retry.text = "다시 쌓기"
+	if ui_font:
+		retry.add_theme_font_override("font", ui_font)
 	retry.add_theme_font_size_override("font_size", 38)
 	retry.custom_minimum_size = Vector2(280, 90)
 	retry.pressed.connect(_restart)
@@ -414,6 +422,8 @@ func _show_game_over() -> void:
 func _make_label(text: String, size: int, color: Color) -> Label:
 	var l := Label.new()
 	l.text = text
+	if ui_font:
+		l.add_theme_font_override("font", ui_font)
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", color)
 	return l
