@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, DROPPING, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v0.4 · sway"
+const GAME_VERSION := "v0.5 · tilt-floor"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -15,6 +15,7 @@ const BLOCK_SIZE := Vector2(180.0, 62.0)
 const DROP_HEIGHT := 240.0          # 다음 벽돌이 나타나는 높이
 const TIP_ANGLE := 0.75             # 이 각도 이상 기울면 붕괴 (라디안)
 const COLLAPSE_FALL := 170.0        # 바닥 아래로 이만큼 떨어지면 붕괴
+const MAX_FLOOR_TILT := 0.7         # 기기를 최대로 기울였을 때 '바닥'이 기우는 각도(라디안)
 
 var state: int = State.CALIB
 var score: int = 0
@@ -23,8 +24,8 @@ var current: Block = null
 var settle_timer: float = 0.0
 var calib_timer: float = 0.0
 var go_shake: float = 0.0           # 붕괴 순간의 카메라 흔들림 버스트
-var sway_phase: float = 0.0         # 탑 전체가 한 몸처럼 출렁이는 흔들림 위상
 var web_permission_asked := false
+var gravity_area: Area2D            # 이 영역의 중력 방향을 기기 기울기로 회전시킨다
 
 var cam: Camera2D
 var ui: CanvasLayer
@@ -48,9 +49,33 @@ func _ready() -> void:
 	_begin_calibration()
 
 
+## 기기 기울기(sway)에 따라 물리 세계의 '아래' 방향을 회전시킨다.
+## = 쟁반을 기울이는 것과 동일. 힘을 주입하지 않으므로 덜덜거림이 없다.
+func _set_floor_tilt(tilt: float) -> void:
+	if not is_instance_valid(gravity_area):
+		return
+	var theta := clampf(tilt, -1.0, 1.0) * MAX_FLOOR_TILT
+	gravity_area.gravity_direction = Vector2(sin(theta), cos(theta))  # (0,1) = 화면 아래
+
+
 # ---------------------------------------------------------------- 월드 구성
 
 func _build_world() -> void:
+	# 중력 영역 — 기울기에 따라 '아래' 방향을 회전시킨다 (쟁반 기울이기)
+	gravity_area = Area2D.new()
+	gravity_area.gravity_space_override = Area2D.SPACE_OVERRIDE_REPLACE
+	gravity_area.gravity_point = false
+	gravity_area.gravity = 1100.0
+	gravity_area.gravity_direction = Vector2(0, 1)
+	gravity_area.priority = 10
+	var acs := CollisionShape2D.new()
+	var arect := RectangleShape2D.new()
+	arect.size = Vector2(12000, 12000)   # 플레이 영역 전체를 덮는다
+	acs.shape = arect
+	gravity_area.add_child(acs)
+	gravity_area.position = Vector2(BASE_X, -2000.0)
+	add_child(gravity_area)
+
 	# 바닥
 	var ground := StaticBody2D.new()
 	ground.position = Vector2(BASE_X, GROUND_TOP_Y + 100.0)
@@ -148,6 +173,7 @@ func _game_over() -> void:
 	state = State.OVER
 	current = null
 	go_shake = 26.0
+	_set_floor_tilt(0.0)                # 잔해는 똑바로 떨어지게 바닥을 수평으로
 	Input.vibrate_handheld(400)         # 붕괴의 햅틱
 	Graveyard.add_record(score)
 	_show_game_over()
@@ -160,6 +186,7 @@ func _restart() -> void:
 	blocks.clear()
 	current = null
 	score = 0
+	_set_floor_tilt(0.0)
 	cam.offset = Vector2.ZERO
 	cam.zoom = Vector2.ONE
 	cam.position = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
@@ -199,24 +226,9 @@ func _physics_process(delta: float) -> void:
 	if state == State.CALIB or state == State.OVER:
 		return
 
-	var sway := Motion.get_sway()      # 기울인 방향 (-1..1)
-	var shake := Motion.get_shake()    # 움직임 세기 (0..1)
-
-	# 흔들림은 탑 '전체'가 한 위상으로 출렁이게 한다 (블록별 랜덤 = 달달거림 → 제거).
-	# 빠르게 움직일수록 출렁임의 진동수/진폭이 커진다.
-	sway_phase += delta * (10.0 + shake * 26.0)
-	var wobble := sin(sway_phase) * shake
-
-	# 기울인 쪽으로 탑이 '기운다'. 위로 갈수록 지렛대 효과로 크게 쏠린다.
-	for i in blocks.size():
-		if i == 0:
-			continue  # 초석(토대)은 고정 — 스웨이는 그 위 스택에서 나온다
-		var b := blocks[i]
-		if not is_instance_valid(b):
-			continue
-		var lever := 1.0 + float(i) * 0.22
-		var fx := (sway * 1500.0 + wobble * 900.0) * lever
-		b.apply_central_force(Vector2(fx, 0.0))
+	# 기기를 기울이면 '바닥의 수평'이 그만큼 기운다 → 탑이 낮은 쪽으로 쏠린다.
+	# (블록마다 힘을 넣지 않으므로 덜덜거림이 없고, 실제 쟁반처럼 자연스럽게 기운다)
+	_set_floor_tilt(Motion.get_sway())
 
 	# 떨어지는 벽돌이 안정되면 다음 차례로
 	if state == State.DROPPING and is_instance_valid(current):
@@ -281,9 +293,10 @@ func _update_ui(delta: float) -> void:
 	height_label.text = "높이  %d" % score
 	best_label.text = "최고  %d" % Graveyard.best
 
-	var shake := Motion.get_shake()
-	stab_fill.size.x = 300.0 * clampf(1.0 - shake, 0.02, 1.0)
-	stab_fill.color = Color(0.32, 0.85, 0.45).lerp(Color(0.92, 0.26, 0.26), shake)
+	# 안정도 = 얼마나 수평인가. 기울일수록(또는 흔들수록) 빨갛게.
+	var inst := clampf(absf(Motion.get_sway()) * 1.1 + Motion.get_shake() * 0.3, 0.0, 1.0)
+	stab_fill.size.x = 300.0 * clampf(1.0 - inst, 0.02, 1.0)
+	stab_fill.color = Color(0.32, 0.85, 0.45).lerp(Color(0.92, 0.26, 0.26), inst)
 
 	match state:
 		State.CALIB:
@@ -297,9 +310,9 @@ func _update_ui(delta: float) -> void:
 					state = State.READY
 				calib_label.text = "가장 편안한 자세로\n기기를 잡으세요\n\n· 보정 중 ·"
 		State.READY:
-			hint_label.text = "화면을 탭하면 벽돌이 쌓입니다\n기기를 최대한 움직이지 마세요"
+			hint_label.text = "화면을 탭하면 벽돌이 쌓입니다\n기기를 수평으로 유지하세요 — 기울면 탑이 쏠립니다"
 		State.DROPPING:
-			hint_label.text = "숨을 참으세요…  가만히"
+			hint_label.text = "숨을 참으세요…  수평 유지"
 		State.OVER:
 			hint_label.text = ""
 
