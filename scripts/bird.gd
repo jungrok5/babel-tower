@@ -5,7 +5,7 @@ extends AnimatableBody2D
 
 signal left
 
-enum S { FLY_IN, ROAM, PERCH, FLY_OUT }
+enum S { FLY_IN, ROAM, APPROACH, PERCH, FLY_OUT }
 
 var s: int = S.FLY_IN
 var target_block: Block = null
@@ -68,14 +68,23 @@ func _physics_process(dt: float) -> void:
 				roam_target = _roam_pick()
 			timer -= dt
 			if timer <= 0.0:
-				s = S.PERCH
-				timer = randf_range(3.5, 6.5)
-				cshape.disabled = false        # 앉으면 물리 충돌 켜짐
+				s = S.APPROACH          # 충돌 OFF 상태로 앉을 자리로 접근
+		S.APPROACH:
+			if not is_instance_valid(target_block):
+				_leave()
+			else:
+				var pp := _perch_point()
+				position = position.lerp(pp, 0.12)
+				if position.distance_to(pp) < 9.0:
+					# 자리에 도착한 뒤에야 충돌을 켠다 → 탑을 들이받지 않음
+					cshape.disabled = false
+					s = S.PERCH
+					timer = randf_range(3.5, 6.5)
 		S.PERCH:
 			if not is_instance_valid(target_block):
 				_leave()
 			else:
-				position = position.lerp(_perch_point(), 0.25)
+				position = position.lerp(_perch_point(), 0.15)   # 살살 따라감
 				timer -= dt
 				if timer <= 0.0:
 					_leave()

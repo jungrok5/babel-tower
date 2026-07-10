@@ -7,15 +7,15 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v2.6 · sky2"
+const GAME_VERSION := "v2.7 · tune"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
 const BLOCK_SIZE := Vector2(180.0, 62.0)
 const DROP_HEIGHT := 150.0          # 다음 벽돌이 떨어지기 시작하는 높이(짧게 = 연사 쌓기 쾌감)
-const TIP_ANGLE := 0.55             # 이 각도 이상 기울면 붕괴 (라디안 ~31°)
+const TIP_ANGLE := 0.5              # 블록이 이 각도 이상 기울면 붕괴 (~28°)
 const COLLAPSE_FALL := 170.0        # 바닥 아래로 이만큼 떨어지면 붕괴
-const MAX_TILT_ANGLE := 0.42        # 최대 기울임에서 바닥(판자)이 기우는 각도(라디안 ~24°)
+const MAX_TILT_ANGLE := 0.52        # 최대 기울임에서 바닥(판자)이 기우는 각도(라디안 ~30°)
 const FOUNDATION_TOP := GROUND_TOP_Y - BLOCK_SIZE.y   # 토대 윗면 Y (수평일 때)
 const TILT_DEADZONE := 0.06         # 이보다 작은 기울기는 무시(미세 손떨림 → 떨림 방지)
 const FLOOR_PIVOT := Vector2(BASE_X, GROUND_TOP_Y)    # 바닥 회전 피벗(토대 중심 바닥)
@@ -127,7 +127,9 @@ func _build_world() -> void:
 	gcs.position = Vector2(0, 100.0)
 	floor_body.add_child(gcs)
 	floor_body.add_child(_make_rect_poly(Vector2(0, 100.0), Vector2(4200.0, 200.0),
-		Color(0.12, 0.13, 0.18)))
+		Color(0.34, 0.24, 0.14)))                                  # 흙
+	floor_body.add_child(_make_rect_poly(Vector2(0, 8.0), Vector2(4200.0, 18.0),
+		Color(0.30, 0.45, 0.18)))                                  # 잔디(윗면)
 
 	# 초석(토대) — 피벗 바로 위, 바닥과 함께 기운다
 	var fcs := CollisionShape2D.new()
