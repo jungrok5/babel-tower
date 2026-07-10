@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v0.8 · guides"
+const GAME_VERSION := "v0.9 · stable"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -86,6 +86,9 @@ func _build_world() -> void:
 	var base := _make_block(0)
 	base.position = Vector2(BASE_X, GROUND_TOP_Y - BLOCK_SIZE.y * 0.5 - 1.0)
 	add_child(base)
+	# 토대는 정적으로 고정 — 탑이 밑에서부터 주저앉는 것을 막는다
+	base.freeze = true
+	base.freeze_mode = RigidBody2D.FREEZE_MODE_STATIC
 	blocks.append(base)
 
 
@@ -178,6 +181,9 @@ func _restart() -> void:
 	var base := _make_block(0)
 	base.position = Vector2(BASE_X, GROUND_TOP_Y - BLOCK_SIZE.y * 0.5 - 1.0)
 	add_child(base)
+	# 토대는 정적으로 고정 — 탑이 밑에서부터 주저앉는 것을 막는다
+	base.freeze = true
+	base.freeze_mode = RigidBody2D.FREEZE_MODE_STATIC
 	blocks.append(base)
 
 	over_panel.visible = false
