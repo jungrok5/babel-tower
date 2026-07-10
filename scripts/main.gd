@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v2.1 · floor2"
+const GAME_VERSION := "v2.2 · zoomout"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -177,7 +177,10 @@ func _game_over() -> void:
 	go_shake = 26.0
 	Input.vibrate_handheld(400)         # 붕괴의 햅틱
 	Graveyard.add_record(score)
-	_show_game_over()
+	# 붕괴 장면(줌아웃)을 잠깐 보여준 뒤 결과 화면을 띄운다
+	await get_tree().create_timer(1.7).timeout
+	if state == State.OVER:             # 그 사이 재시작하지 않았다면
+		_show_game_over()
 
 
 func _restart() -> void:
@@ -312,14 +315,24 @@ func _draw() -> void:
 
 
 func _update_camera(delta: float) -> void:
-	var target := Vector2(BASE_X, _tower_top_edge() - 200.0)
-	if state == State.CALIB:
+	var target: Vector2
+	var z: float
+	if state == State.OVER:
+		# 붕괴 시: 지면~꼭대기 전체가 보이도록 줌아웃 (무너지는 걸 다 볼 수 있게)
+		var tower_top_y := GROUND_TOP_Y - float(score) * BLOCK_SIZE.y
+		var mid_y := (GROUND_TOP_Y + tower_top_y) * 0.5
+		var needed := (GROUND_TOP_Y - tower_top_y) + 700.0   # 여백 포함 높이
+		z = clampf(1280.0 / needed, 0.16, 1.0)
+		target = Vector2(BASE_X, mid_y)
+	elif state == State.CALIB:
 		target = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
-	cam.position = cam.position.lerp(target, 0.08)
-
-	# 높이 오를수록 줌아웃 → 작은 떨림도 크게 보이는 "공포" 시스템
-	var z := clampf(1.0 - float(score) * 0.03, 0.42, 1.0)
-	cam.zoom = cam.zoom.lerp(Vector2(z, z), 0.05)
+		z = 1.0
+	else:
+		target = Vector2(BASE_X, _tower_top_edge() - 200.0)
+		# 높이 오를수록 줌아웃 → 작은 떨림도 크게 보이는 "공포" 시스템
+		z = clampf(1.0 - float(score) * 0.03, 0.42, 1.0)
+	cam.position = cam.position.lerp(target, 0.09)
+	cam.zoom = cam.zoom.lerp(Vector2(z, z), 0.06)
 
 	# 카메라 셰이크는 '붕괴 순간'에만. (예전엔 센서 움직임에 반응해 화면이 위아래로
 	# 떨렸는데 그게 위아래 떨림의 원인이었다 — 제거)
