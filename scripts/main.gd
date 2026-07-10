@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v1.1 · drag"
+const GAME_VERSION := "v1.2 · calm"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -16,7 +16,8 @@ const DROP_HEIGHT := 150.0          # 다음 벽돌이 떨어지기 시작하는
 const TIP_ANGLE := 0.75             # 이 각도 이상 기울면 붕괴 (라디안)
 const COLLAPSE_FALL := 170.0        # 바닥 아래로 이만큼 떨어지면 붕괴
 const MAX_FLOOR_TILT := 0.7         # 기기를 최대로 기울였을 때 '바닥'이 기우는 각도(라디안)
-const GRAVITY_MAG := 1100.0         # 중력 크기 (블록에 직접 적용)
+const GRAVITY_MAG := 1100.0         # 중력 크기
+const TILT_DEADZONE := 0.08         # 이보다 작은 기울기는 무시(미세 손떨림 → 떨림 방지)
 
 var state: int = State.CALIB
 var score: int = 0
@@ -24,6 +25,7 @@ var blocks: Array[Block] = []
 var calib_timer: float = 0.0
 var go_shake: float = 0.0           # 붕괴 순간의 카메라 흔들림 버스트
 var web_permission_asked := false
+var gravity_area: Area2D            # 이 영역의 중력 방향을 기기 기울기로 회전시킨다
 var aiming := false                 # 손을 대고 위치를 조준 중인가
 var aim_x := BASE_X                 # 떨어뜨릴 가로 위치(월드 좌표)
 
@@ -49,17 +51,34 @@ func _ready() -> void:
 	_begin_calibration()
 
 
-## 현재 상태에 맞는 '아래' 방향. 플레이 중엔 기기 기울기만큼 회전한다.
-func _gravity_dir() -> Vector2:
-	if state == State.READY:
-		var theta := clampf(Motion.get_sway(), -1.0, 1.0) * MAX_FLOOR_TILT
-		return Vector2(sin(theta), cos(theta))  # (0,1) = 화면 아래
-	return Vector2(0, 1)  # 보정/게임오버: 수평(잔해는 똑바로 낙하)
+## 데드존을 적용한 기울기 (작은 손떨림은 0으로 무시). -1..1
+func _tilt_amount() -> float:
+	if state != State.READY:
+		return 0.0
+	var raw := Motion.get_sway()
+	if absf(raw) <= TILT_DEADZONE:
+		return 0.0
+	return signf(raw) * (absf(raw) - TILT_DEADZONE) / (1.0 - TILT_DEADZONE)
 
 
 # ---------------------------------------------------------------- 월드 구성
 
 func _build_world() -> void:
+	# 중력 영역 — 기기 기울기만큼 '아래' 방향을 회전시킨다(엔진 중력 사용 → 안착이 깔끔).
+	gravity_area = Area2D.new()
+	gravity_area.gravity_space_override = Area2D.SPACE_OVERRIDE_REPLACE
+	gravity_area.gravity_point = false
+	gravity_area.gravity = GRAVITY_MAG
+	gravity_area.gravity_direction = Vector2(0, 1)
+	gravity_area.priority = 10
+	var acs := CollisionShape2D.new()
+	var arect := RectangleShape2D.new()
+	arect.size = Vector2(16000, 200000)   # 매우 높은 탑까지 덮는다
+	acs.shape = arect
+	gravity_area.add_child(acs)
+	gravity_area.position = Vector2(BASE_X, GROUND_TOP_Y - 90000.0)
+	add_child(gravity_area)
+
 	# 바닥
 	var ground := StaticBody2D.new()
 	ground.position = Vector2(BASE_X, GROUND_TOP_Y + 100.0)
@@ -226,14 +245,19 @@ func _clamp_aim(x: float) -> float:
 
 # ---------------------------------------------------------------- 물리
 
-func _physics_process(delta: float) -> void:
-	# 중력은 모든 상태에서 블록에 직접 넣는다(gravity_scale=0이므로).
-	# 플레이 중엔 기기 기울기만큼 '아래'가 회전 → 탑이 낮은 쪽으로 쏠린다.
-	# 코히런트한 힘이라 덜덜거림이 없고, 매 프레임 받으므로 블록이 잠들지 않는다.
-	var gdir := _gravity_dir()
-	for b in blocks:
-		if is_instance_valid(b) and not b.freeze:  # 정적 고정된 하단 블록은 건너뛴다
-			b.apply_central_force(gdir * GRAVITY_MAG * b.mass)
+func _physics_process(_delta: float) -> void:
+	# 기기 기울기만큼 중력 영역의 '아래' 방향을 회전. 엔진 중력을 쓰므로 블록은
+	# 가만히 있으면 잠들어(sleep) 물리가 손대지 않는다 → 떨림 0.
+	var tilt := _tilt_amount()
+	var theta := tilt * MAX_FLOOR_TILT
+	if is_instance_valid(gravity_area):
+		gravity_area.gravity_direction = Vector2(sin(theta), cos(theta))
+
+	# 기울이는 중일 때만 블록을 깨워 반응시킨다. 수평이면 그대로 잠들어 안정.
+	if absf(tilt) > 0.0:
+		for b in blocks:
+			if is_instance_valid(b) and not b.freeze:
+				b.sleeping = false
 
 	if state == State.CALIB or state == State.OVER:
 		return

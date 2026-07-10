@@ -27,13 +27,13 @@ func _ready() -> void:
 	physics_material_override = mat
 
 	mass = 2.0
-	# 댐핑으로 미세 진동을 가라앉혀 '묵직한 돌' 느낌을 준다(덜덜거림 감소).
+	# 댐핑으로 미세 진동을 가라앉혀 '묵직한 돌' 느낌을 준다.
 	linear_damp = 0.7
 	angular_damp = 1.4
-	# 중력은 main이 매 프레임 '기울인 방향'으로 직접 넣는다(gravity_scale=0).
-	# 이렇게 하면 블록이 잠들지 않고 기울기에 계속 반응한다.
-	gravity_scale = 0.0
-	can_sleep = false
+	# 엔진 중력을 쓴다(방향은 main의 Area2D가 기울기만큼 회전).
+	# can_sleep=true → 가만히 있으면 잠들어 물리가 손대지 않는다(떨림 제거).
+	gravity_scale = 1.0
+	can_sleep = true
 	# 빠르게 떨어질 때 벽돌이 서로를 뚫고 지나가는 것 방지
 	continuous_cd = RigidBody2D.CCD_MODE_CAST_SHAPE
 	queue_redraw()
