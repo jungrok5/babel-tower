@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v1.0 · tall"
+const GAME_VERSION := "v1.1 · drag"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -17,7 +17,6 @@ const TIP_ANGLE := 0.75             # 이 각도 이상 기울면 붕괴 (라디
 const COLLAPSE_FALL := 170.0        # 바닥 아래로 이만큼 떨어지면 붕괴
 const MAX_FLOOR_TILT := 0.7         # 기기를 최대로 기울였을 때 '바닥'이 기우는 각도(라디안)
 const GRAVITY_MAG := 1100.0         # 중력 크기 (블록에 직접 적용)
-const KEEP_DYNAMIC := 18            # 꼭대기 이 개수만 물리 활성, 그보다 깊으면 정적 고정
 
 var state: int = State.CALIB
 var score: int = 0
@@ -25,6 +24,8 @@ var blocks: Array[Block] = []
 var calib_timer: float = 0.0
 var go_shake: float = 0.0           # 붕괴 순간의 카메라 흔들림 버스트
 var web_permission_asked := false
+var aiming := false                 # 손을 대고 위치를 조준 중인가
+var aim_x := BASE_X                 # 떨어뜨릴 가로 위치(월드 좌표)
 
 var cam: Camera2D
 var ui: CanvasLayer
@@ -135,30 +136,18 @@ func _on_sensor_enable() -> void:
 	_start_calibration_countdown()
 
 
-## 탭 즉시 다음 벽돌을 떨어뜨린다. 안착을 기다리지 않으므로 파파파팍 연사 가능.
-func _drop_block() -> void:
+## 지정한 가로 위치(at_x) 위에서 벽돌을 떨어뜨린다. 안착을 기다리지 않아 연사 가능.
+func _drop_block(at_x: float = BASE_X) -> void:
 	var top := _top_block()
-	var sx := BASE_X
 	var sy := GROUND_TOP_Y - BLOCK_SIZE.y * 0.5 - DROP_HEIGHT
 	if top != null:
-		# 기울어 있어도 탑 꼭대기 바로 위에 떨어뜨린다
-		sx = top.position.x
+		# 세로는 항상 탑 꼭대기 위에서 낙하 (가로는 손 뗀 위치)
 		sy = top.position.y - top.block_size.y * 0.5 - DROP_HEIGHT
 	var b := _make_block(score + 1)
-	b.position = Vector2(sx, sy)
+	b.position = Vector2(at_x, sy)
 	add_child(b)
 	blocks.append(b)
 	score += 1
-
-	# 꼭대기 근처 KEEP_DYNAMIC개만 물리 활성 — 그보다 깊은 블록은 정적 고정한다.
-	# → 무한정 높이에서도 안정적이고, 폰에서 활성 강체 수가 제한돼 가볍다.
-	# (낮은 탑은 전부 동적이라 '탑 전체 기울임/회복' 감각은 그대로 유지)
-	var freeze_idx := blocks.size() - 1 - KEEP_DYNAMIC
-	if freeze_idx > 0 and is_instance_valid(blocks[freeze_idx]):
-		var fb: Block = blocks[freeze_idx]
-		if not fb.freeze:
-			fb.freeze = true
-			fb.freeze_mode = RigidBody2D.FREEZE_MODE_STATIC
 
 
 func _top_block() -> Block:
@@ -173,6 +162,7 @@ func _game_over() -> void:
 	if state == State.OVER:
 		return
 	state = State.OVER
+	aiming = false
 	go_shake = 26.0
 	Input.vibrate_handheld(400)         # 붕괴의 햅틱
 	Graveyard.add_record(score)
@@ -185,6 +175,8 @@ func _restart() -> void:
 			b.queue_free()
 	blocks.clear()
 	score = 0
+	aiming = false
+	aim_x = BASE_X
 	cam.offset = Vector2.ZERO
 	cam.zoom = Vector2.ONE
 	cam.position = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
@@ -204,20 +196,32 @@ func _restart() -> void:
 # ---------------------------------------------------------------- 입력
 
 func _unhandled_input(event: InputEvent) -> void:
-	# 터치는 emulate_mouse_from_touch로 마우스 이벤트가 되므로 마우스 버튼만 처리한다.
-	# (터치+마우스 둘 다 받으면 한 번에 두 개가 떨어진다)
-	var tapped := false
-	if event is InputEventMouseButton and event.pressed \
-			and event.button_index == MOUSE_BUTTON_LEFT:
-		tapped = true
-	elif event is InputEventKey and event.pressed and not event.echo \
-			and event.keycode == KEY_SPACE:
-		tapped = true
-	if not tapped:
+	# 드래그해서 놓기: 누르는 순간부터 조준, 좌우로 끌어 위치를 정하고, 떼면 낙하.
+	# 터치는 emulate_mouse_from_touch로 마우스 이벤트가 되므로 마우스 이벤트로 처리.
+	if event is InputEventKey:
+		if event.pressed and not event.echo and event.keycode == KEY_SPACE and state == State.READY:
+			_drop_block(_clamp_aim(BASE_X))
 		return
 
-	if state == State.READY:
-		_drop_block()
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			if state == State.READY:
+				aiming = true
+				aim_x = _clamp_aim(_screen_to_world_x(event.position))
+		else:  # 손을 뗌 → 그 위치에 낙하
+			if aiming and state == State.READY:
+				_drop_block(aim_x)
+			aiming = false
+	elif aiming and (event is InputEventMouseMotion or event is InputEventScreenDrag):
+		aim_x = _clamp_aim(_screen_to_world_x(event.position))
+
+
+func _screen_to_world_x(screen_pos: Vector2) -> float:
+	return (get_viewport().get_canvas_transform().affine_inverse() * screen_pos).x
+
+
+func _clamp_aim(x: float) -> float:
+	return clampf(x, BASE_X - 620.0, BASE_X + 620.0)
 
 
 # ---------------------------------------------------------------- 물리
@@ -278,19 +282,17 @@ func _draw() -> void:
 		Vector2(BASE_X, GROUND_TOP_Y + 40.0),
 		Color(0.55, 0.6, 0.75, 0.22), 2.0, 14.0)
 
-	# 2) 다음 벽돌이 떨어질 위치 (꼭대기 블록 바로 위) — 고스트 + 낙하 컬럼
-	var top := _top_block()
-	var sx := BASE_X
-	var sy := GROUND_TOP_Y - BLOCK_SIZE.y * 0.5 - DROP_HEIGHT
-	if top != null:
-		sx = top.position.x
-		sy = top.position.y - top.block_size.y * 0.5 - DROP_HEIGHT
-	var ghost := Rect2(Vector2(sx, sy) - BLOCK_SIZE * 0.5, BLOCK_SIZE)
-	draw_rect(ghost, Color(0.96, 0.9, 0.6, 0.28), false, 2.0)
-	draw_dashed_line(
-		Vector2(sx, sy + BLOCK_SIZE.y * 0.5),
-		Vector2(sx, sy + DROP_HEIGHT + BLOCK_SIZE.y * 0.5),
-		Color(0.96, 0.9, 0.6, 0.35), 2.0, 10.0)
+	# 2) 조준 중일 때만: 손을 뗄 위치에 고스트 칸 + 바닥까지 내려가는 낙하 컬럼
+	if aiming:
+		var sy := top_edge - DROP_HEIGHT
+		var alpha := 0.85
+		var ghost := Rect2(Vector2(aim_x, sy) - BLOCK_SIZE * 0.5, BLOCK_SIZE)
+		draw_rect(ghost, Color(0.96, 0.9, 0.6, 0.16 * alpha), true)          # 반투명 채움
+		draw_rect(ghost, Color(0.98, 0.92, 0.55, alpha), false, 3.0)         # 테두리
+		draw_dashed_line(
+			Vector2(aim_x, sy + BLOCK_SIZE.y * 0.5),
+			Vector2(aim_x, GROUND_TOP_Y),
+			Color(0.98, 0.92, 0.55, 0.5), 2.0, 12.0)
 
 
 func _update_camera(delta: float) -> void:
@@ -332,7 +334,7 @@ func _update_ui(delta: float) -> void:
 					state = State.READY
 				calib_label.text = "가장 편안한 자세로\n기기를 잡으세요\n\n· 보정 중 ·"
 		State.READY:
-			hint_label.text = "탭해서 계속 쌓으세요 (노란칸=낙하 위치, 점선=중심)\n기기를 수평으로 — 기울면 탑이 쏠립니다"
+			hint_label.text = "누른 채 좌우로 움직여 위치를 정하고 떼면 떨어집니다\n기기를 수평으로 — 기울면 탑이 쏠립니다"
 		State.OVER:
 			hint_label.text = ""
 
