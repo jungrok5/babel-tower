@@ -6,6 +6,9 @@ extends Node2D
 
 enum State { CALIB, READY, DROPPING, OVER }
 
+## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
+const GAME_VERSION := "v0.4 · sway"
+
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
 const BLOCK_SIZE := Vector2(180.0, 62.0)
@@ -341,6 +344,11 @@ func _build_ui() -> void:
 	hint_label.size = Vector2(720, 120)
 	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ui.add_child(hint_label)
+
+	# 빌드 버전 (좌하단) — 캐시 확인용
+	var ver := _make_label(GAME_VERSION, 22, Color(0.45, 0.47, 0.55))
+	ver.position = Vector2(20, 1234)
+	ui.add_child(ver)
 
 	_build_calib_panel()
 	_build_over_panel()
