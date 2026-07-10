@@ -1,0 +1,37 @@
+name: Physics Test (headless)
+
+# 실제 Godot 엔진으로 헤드리스 물리 테스트를 돌려, 수평인데도 20개쯤에서
+# 스스로 붕괴하는지(높은 스택 불안정성)를 로그로 확인한다.
+
+on:
+  push:
+    branches:
+      - claude/stillness-tower-game-tccfaj
+  workflow_dispatch:
+
+jobs:
+  physics-test:
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: "4.7"
+      GODOT_RELEASE: "stable"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Godot (editor only, no export templates needed)
+        run: |
+          BASE="https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-${GODOT_RELEASE}"
+          EDITOR="Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_linux.x86_64"
+          curl -L -o godot.zip "${BASE}/${EDITOR}.zip"
+          unzip -o godot.zip
+          mv "${EDITOR}" godot
+          chmod +x godot
+
+      - name: Import project
+        run: ./godot --headless --import . || true
+
+      - name: Run headless stacking test
+        run: |
+          ./godot --headless res://test/StackTest.tscn 2>&1 | tee physics_out.log
+          echo "----- extracted TEST lines -----"
+          grep "\[TEST\]" physics_out.log || true
