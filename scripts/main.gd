@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v2.2 · zoomout"
+const GAME_VERSION := "v2.3 · tiltfloor"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -15,9 +15,10 @@ const BLOCK_SIZE := Vector2(180.0, 62.0)
 const DROP_HEIGHT := 150.0          # 다음 벽돌이 떨어지기 시작하는 높이(짧게 = 연사 쌓기 쾌감)
 const TIP_ANGLE := 0.75             # 이 각도 이상 기울면 붕괴 (라디안)
 const COLLAPSE_FALL := 170.0        # 바닥 아래로 이만큼 떨어지면 붕괴
-const FLOOR_RANGE := 320.0          # 최대 기울임에서 바닥이 중심에서 좌우로 이동하는 거리(px)
-const FOUNDATION_TOP := GROUND_TOP_Y - BLOCK_SIZE.y   # 토대 윗면 Y
-const TILT_DEADZONE := 0.08         # 이보다 작은 기울기는 무시(미세 손떨림 → 떨림 방지)
+const MAX_TILT_ANGLE := 0.32        # 최대 기울임에서 바닥(판자)이 기우는 각도(라디안 ~18°)
+const FOUNDATION_TOP := GROUND_TOP_Y - BLOCK_SIZE.y   # 토대 윗면 Y (수평일 때)
+const TILT_DEADZONE := 0.06         # 이보다 작은 기울기는 무시(미세 손떨림 → 떨림 방지)
+const FLOOR_PIVOT := Vector2(BASE_X, GROUND_TOP_Y)    # 바닥 회전 피벗(토대 중심 바닥)
 
 var state: int = State.CALIB
 var score: int = 0
@@ -55,35 +56,35 @@ func _ready() -> void:
 # ---------------------------------------------------------------- 월드 구성
 
 func _build_world() -> void:
-	# 센서에 따라 좌우로 움직이는 물리 바닥(AnimatableBody2D). 중력은 항상 아래로 고정.
-	# 위 블록들은 이 바닥과의 마찰/관성으로만 반응한다(= 쟁반을 좌우로 미는 것).
+	# 센서에 따라 '기우는(경사)' 물리 바닥(판자). 중력은 항상 아래로 고정.
+	# 바닥이 기울면 그 위 블록들이 경사 때문에 넘어진다(= 판자를 기울이는 것).
+	# 피벗(원점)을 토대 중심 바닥에 두고, 자식들은 그 기준 상대 좌표로 배치한다.
 	floor_body = AnimatableBody2D.new()
 	floor_body.sync_to_physics = true
+	floor_body.position = FLOOR_PIVOT
 	var fmat := PhysicsMaterial.new()
-	fmat.friction = 0.9
+	fmat.friction = 1.0
 	fmat.bounce = 0.0
 	floor_body.physics_material_override = fmat
 
-	# 바닥판(콜리전 + 비주얼)
+	# 바닥판 (피벗 아래) — 넓게
 	var gcs := CollisionShape2D.new()
 	var gshape := RectangleShape2D.new()
-	gshape.size = Vector2(3200.0, 200.0)
+	gshape.size = Vector2(4200.0, 200.0)
 	gcs.shape = gshape
-	gcs.position = Vector2(BASE_X, GROUND_TOP_Y + 100.0)
+	gcs.position = Vector2(0, 100.0)
 	floor_body.add_child(gcs)
-	floor_body.add_child(_make_rect_poly(
-		Vector2(BASE_X, GROUND_TOP_Y + 100.0), Vector2(3200.0, 200.0),
+	floor_body.add_child(_make_rect_poly(Vector2(0, 100.0), Vector2(4200.0, 200.0),
 		Color(0.12, 0.13, 0.18)))
 
-	# 초석(토대) — 바닥의 일부로 함께 움직인다
+	# 초석(토대) — 피벗 바로 위, 바닥과 함께 기운다
 	var fcs := CollisionShape2D.new()
 	var fshape := RectangleShape2D.new()
 	fshape.size = BLOCK_SIZE
 	fcs.shape = fshape
-	fcs.position = Vector2(BASE_X, GROUND_TOP_Y - BLOCK_SIZE.y * 0.5)
+	fcs.position = Vector2(0, -BLOCK_SIZE.y * 0.5)
 	floor_body.add_child(fcs)
-	floor_body.add_child(_make_rect_poly(
-		Vector2(BASE_X, GROUND_TOP_Y - BLOCK_SIZE.y * 0.5), BLOCK_SIZE, _brick_color(0)))
+	floor_body.add_child(_make_rect_poly(Vector2(0, -BLOCK_SIZE.y * 0.5), BLOCK_SIZE, _brick_color(0)))
 
 	add_child(floor_body)
 
@@ -195,7 +196,8 @@ func _restart() -> void:
 	cam.zoom = Vector2.ONE
 	cam.position = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
 	if is_instance_valid(floor_body):
-		floor_body.position = Vector2.ZERO   # 바닥을 중앙으로 (토대는 바닥의 일부라 유지됨)
+		floor_body.rotation = 0.0            # 바닥을 수평으로 (토대는 바닥의 일부라 유지됨)
+		floor_body.position = FLOOR_PIVOT
 
 	over_panel.visible = false
 	state = State.READY
@@ -237,12 +239,12 @@ func _clamp_aim(x: float) -> float:
 # ---------------------------------------------------------------- 물리
 
 func _physics_process(_delta: float) -> void:
-	# 센서 기울기만큼 바닥을 중심 기준 좌우로 이동시킨다. 중력은 항상 아래로 고정이므로
-	# 바닥이 멈추면 블록은 그대로 잠들어(sleep) 떨림이 없다. 바닥이 움직이면 마찰/관성으로
-	# 위 블록들이 끌려가고, 급격히 움직이면 꼭대기부터 무너진다.
-	var target_x := _tilt_amount() * FLOOR_RANGE
+	# 센서 기울기만큼 바닥(판자)을 기울인다(경사). 중력은 항상 아래로 고정이므로
+	# 바닥이 수평이면 블록은 그대로 잠들어(sleep) 떨림이 없다. 바닥이 기울면 경사 때문에
+	# 위 블록들이(마찰로 붙어 있다가) 넘어진다 — 미끄러지는 게 아니라 기울어 넘어진다.
+	var target_angle := _tilt_amount() * MAX_TILT_ANGLE
 	if is_instance_valid(floor_body):
-		floor_body.position.x = lerpf(floor_body.position.x, target_x, 0.18)
+		floor_body.rotation = lerpf(floor_body.rotation, target_angle, 0.15)
 
 	if state == State.CALIB or state == State.OVER:
 		return
