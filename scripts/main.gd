@@ -13,7 +13,7 @@ const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
 const BLOCK_SIZE := Vector2(180.0, 62.0)
 const DROP_HEIGHT := 150.0          # 다음 벽돌이 떨어지기 시작하는 높이(짧게 = 연사 쌓기 쾌감)
-const TIP_ANGLE := 0.75             # 이 각도 이상 기울면 붕괴 (라디안)
+const TIP_ANGLE := 0.55             # 이 각도 이상 기울면 붕괴 (라디안 ~31°)
 const COLLAPSE_FALL := 170.0        # 바닥 아래로 이만큼 떨어지면 붕괴
 const MAX_TILT_ANGLE := 0.42        # 최대 기울임에서 바닥(판자)이 기우는 각도(라디안 ~24°)
 const FOUNDATION_TOP := GROUND_TOP_Y - BLOCK_SIZE.y   # 토대 윗면 Y (수평일 때)

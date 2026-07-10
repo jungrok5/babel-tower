@@ -24,9 +24,9 @@ func _ready() -> void:
 	add_child(cs)
 
 	var mat := PhysicsMaterial.new()
-	# 마찰을 높여 바닥을 살살 움직이면 탑이 함께 따라오고(안 미끄러짐),
-	# 급하게 움직여야 관성으로 뒤처져 무너지게 한다.
-	mat.friction = 1.0
+	# 마찰: 너무 높으면(1.0) 바닥에 딱 붙어 통째로 기울기만 하고 안 넘어진다.
+	# 적당히 낮춰 경사에서 상단 블록이 실제로 넘어가게 한다(미끄럼틀처럼 밀리진 않음).
+	mat.friction = 0.7
 	mat.bounce = 0.0
 	physics_material_override = mat
 

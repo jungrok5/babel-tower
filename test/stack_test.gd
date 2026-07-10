@@ -15,21 +15,21 @@ func _ready() -> void:
 		await get_tree().physics_frame
 		t += 1
 
-	await _build_to(12)
+	await _build_to(8)
 	await _steps(240)
 	var r := await _measure(90)
-	print("[TEST] LEVEL(12): jitter x=%.2f y=%.2f  maxgap=%.2f px  sleeping=%d/%d" % [
+	print("[TEST] LEVEL(8): jitter x=%.2f y=%.2f  maxgap=%.2f px  sleeping=%d/%d" % [
 		r.jx, r.jy, _gap(), r.s, main.blocks.size()])
 
-	# 바닥을 서서히 기울여 몇 도에서 넘어지는지 확인 (높은 탑=12층)
+	# 바닥을 서서히 기울여 몇 도에서 넘어지는지 (8층)
 	Motion.set_process(false)
-	for sway in [0.3, 0.5, 0.7, 0.85, 1.0]:
+	for sway in [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0]:
 		Motion._sway = float(sway)
-		await _steps(90)
+		await _steps(85)
 		print("[TEST] TILT sway=%.2f  floor_deg=%.1f  top_rot_deg=%.1f  state=%d" % [
 			sway, rad_to_deg(main.floor_body.rotation), rad_to_deg(_top_rot()), int(main.state)])
 		if int(main.state) == 2:
-			print("[TEST] --> 붕괴 at floor_deg above")
+			print("[TEST] --> 붕괴")
 			break
 
 	get_tree().quit()
