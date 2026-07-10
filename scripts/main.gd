@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v2.4 · juice"
+const GAME_VERSION := "v2.5 · sky"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -35,6 +35,13 @@ var drag_start_world := 0.0         # 드래그 시작 지점(상대 이동 기�
 var show_guides := false            # 안정도바·중심선 표시 (기본 숨김)
 var last_milestone := 0             # 마지막으로 돌파한 미터 구간
 var record_broken := false          # 이번 판에 최고기록을 깼는가
+var sky: Control                    # 높이별 하늘 배경
+var world_time := 0.0               # 구름/별 애니메이션용 시간
+var wind_phase := 0.0               # 바람 위상(물리)
+var bird: Node2D = null             # 현재 날아다니는 새(1마리)
+var bird_timer := 8.0               # 다음 새까지
+var sfx := {}                       # 효과음 플레이어 모음
+var amb_wind: AudioStreamPlayer     # 바람 앰비언스(고도에 따라 커짐)
 
 var cam: Camera2D
 var ui: CanvasLayer
@@ -55,9 +62,40 @@ var ui_font: Font
 
 func _ready() -> void:
 	randomize()
+	_build_environment()
 	_build_world()
 	_build_ui()
+	_build_audio()
 	_begin_calibration()
+
+
+func _build_environment() -> void:
+	var bg := CanvasLayer.new()
+	bg.layer = -10
+	add_child(bg)
+	sky = load("res://scripts/sky.gd").new()
+	bg.add_child(sky)
+
+
+func _build_audio() -> void:
+	for n in ["place", "chirp", "milestone", "record", "collapse"]:
+		var p := AudioStreamPlayer.new()
+		p.stream = load("res://assets/sfx/%s.wav" % n)
+		add_child(p)
+		sfx[n] = p
+	amb_wind = AudioStreamPlayer.new()
+	amb_wind.stream = load("res://assets/sfx/wind.wav")
+	amb_wind.volume_db = -60.0
+	amb_wind.finished.connect(func(): amb_wind.play())   # 계속 루프
+	add_child(amb_wind)
+	amb_wind.play()
+
+
+func _play(name: String, pitch_var := 0.0) -> void:
+	if sfx.has(name):
+		var p: AudioStreamPlayer = sfx[name]
+		p.pitch_scale = 1.0 + randf_range(-pitch_var, pitch_var)
+		p.play()
 
 
 # ---------------------------------------------------------------- 월드 구성
@@ -179,6 +217,7 @@ func _meters() -> int:
 func _on_block_landed() -> void:
 	go_shake = maxf(go_shake, 5.0)
 	Input.vibrate_handheld(12)
+	_play("place", 0.14)
 
 
 ## 높이 미터 구간 돌파 / 최고 기록 갱신 시 이펙트
@@ -189,11 +228,13 @@ func _check_progress() -> void:
 		_popup("%d m 돌파!" % last_milestone, Color(0.45, 0.85, 1.0))
 		go_shake = maxf(go_shake, 9.0)
 		Input.vibrate_handheld(35)
+		_play("milestone")
 	if not record_broken and Graveyard.best > 0 and score > Graveyard.best:
 		record_broken = true
 		_popup("최고 기록 갱신!", Color(1.0, 0.82, 0.25))
 		go_shake = maxf(go_shake, 15.0)
 		Input.vibrate_handheld(70)
+		_play("record")
 
 
 ## 화면 중앙 상단에 팝업 텍스트를 띄우고 커졌다 사라지게 한다
@@ -234,6 +275,10 @@ func _game_over() -> void:
 	state = State.OVER
 	aiming = false
 	go_shake = 26.0
+	if is_instance_valid(bird):
+		bird.queue_free()
+	bird = null
+	_play("collapse")
 	Input.vibrate_handheld(400)         # 붕괴의 햅틱
 	Graveyard.add_record(score)
 	# 붕괴 장면(줌아웃)을 잠깐 보여준 뒤 결과 화면을 띄운다
@@ -252,6 +297,11 @@ func _restart() -> void:
 	aim_x = BASE_X
 	last_milestone = 0
 	record_broken = false
+	wind_phase = 0.0
+	bird_timer = randf_range(6.0, 10.0)
+	if is_instance_valid(bird):
+		bird.queue_free()
+	bird = null
 	cam.offset = Vector2.ZERO
 	cam.zoom = Vector2.ONE
 	cam.position = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
@@ -298,18 +348,51 @@ func _clamp_aim(x: float) -> float:
 
 # ---------------------------------------------------------------- 물리
 
-func _physics_process(_delta: float) -> void:
-	# 센서 기울기만큼 바닥(판자)을 기울인다(경사). 중력은 항상 아래로 고정이므로
-	# 바닥이 수평이면 블록은 그대로 잠들어(sleep) 떨림이 없다. 바닥이 기울면 경사 때문에
-	# 위 블록들이(마찰로 붙어 있다가) 넘어진다 — 미끄러지는 게 아니라 기울어 넘어진다.
+func _physics_process(delta: float) -> void:
+	# 센서 기울기만큼 바닥(판자)을 기울인다(경사). 중력은 항상 아래로 고정.
+	# 바닥이 수평이면 블록은 잠들어(sleep) 떨림이 없다. 기울면 경사 때문에 위 블록이 넘어진다.
 	var target_angle := _tilt_amount() * MAX_TILT_ANGLE
+	if state == State.READY:
+		# 고도에 따른 바람(돌풍) — 높을수록 바닥이 미세하게 흔들려 어려워진다
+		wind_phase += delta
+		var wind_str := clampf((float(_meters()) - 80.0) / 500.0, 0.0, 1.0) * 0.06
+		target_angle += (sin(wind_phase * 1.3) * 0.7 + sin(wind_phase * 0.5 + 1.0) * 0.3) * wind_str
 	if is_instance_valid(floor_body):
 		floor_body.rotation = lerpf(floor_body.rotation, target_angle, 0.15)
 
 	if state == State.CALIB or state == State.OVER:
 		return
 
+	_update_birds(delta)
 	_check_collapse()
+
+
+func _update_birds(delta: float) -> void:
+	if bird != null:
+		return
+	bird_timer -= delta
+	if bird_timer <= 0.0:
+		_spawn_bird()
+
+
+func _spawn_bird() -> void:
+	bird_timer = randf_range(7.0, 13.0)
+	var m := _meters()
+	if m < 15 or m > 380:          # 지면 근처·우주엔 새 없음
+		return
+	var top := _top_block()
+	if top == null:
+		return
+	bird = load("res://scripts/bird.gd").new()
+	bird.setup(top, randf() < 0.5)
+	bird.left.connect(_on_bird_left)
+	add_child(bird)
+	_play("chirp", 0.08)
+
+
+func _on_bird_left() -> void:
+	bird = null
+	bird_timer = randf_range(7.0, 13.0)
 
 
 ## 데드존을 적용한 기울기(작은 손떨림은 무시). -1..1
@@ -346,6 +429,13 @@ func _tower_top_edge() -> float:
 # ---------------------------------------------------------------- 프레임 업데이트
 
 func _process(delta: float) -> void:
+	world_time += delta
+	if sky != null:
+		sky.meters = float(_meters())
+		sky.t = world_time
+	if amb_wind != null:
+		var tv := lerpf(-60.0, -13.0, clampf((float(_meters()) - 60.0) / 500.0, 0.0, 1.0))
+		amb_wind.volume_db = lerpf(amb_wind.volume_db, tv, 0.04)
 	_update_camera(delta)
 	_update_ui(delta)
 	queue_redraw()  # 낙하 위치/중심 가이드 갱신
