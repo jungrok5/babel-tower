@@ -30,6 +30,8 @@ var hint_label: Label
 var stab_fill: ColorRect
 var calib_panel: Control
 var calib_label: Label
+var calib_button: Button
+var awaiting_sensor: bool = false
 var over_panel: Control
 var over_body: VBoxContainer
 
@@ -92,10 +94,29 @@ func _brick_color(level: int) -> Color:
 
 func _begin_calibration() -> void:
 	state = State.CALIB
-	calib_timer = 1.6
-	Motion.start_calibration(calib_timer)
 	calib_panel.visible = true
 	over_panel.visible = false
+	# 웹: 사용자가 "센서 켜기"를 눌러야 모션 권한 요청 + 보정 시작 (iOS 제스처 요건)
+	if OS.has_feature("web") and not web_permission_asked:
+		awaiting_sensor = true
+		calib_button.visible = true
+	else:
+		# 네이티브(Android/iOS 앱)/재보정: 곧바로 보정 시작
+		_start_calibration_countdown()
+
+
+func _start_calibration_countdown() -> void:
+	awaiting_sensor = false
+	calib_button.visible = false
+	calib_timer = 1.6
+	Motion.start_calibration(calib_timer)
+
+
+func _on_sensor_enable() -> void:
+	if not web_permission_asked:
+		web_permission_asked = true
+		Motion.request_web_permission()
+	_start_calibration_countdown()
 
 
 func _drop_block() -> void:
@@ -162,11 +183,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not tapped:
 		return
 
-	# 첫 상호작용에서 웹 센서 권한 요청 (iOS)
-	if not web_permission_asked:
-		web_permission_asked = true
-		Motion.request_web_permission()
-
+	# 웹 모션 권한은 보정 화면의 "센서 켜기" 버튼에서 처리한다.
 	if state == State.READY:
 		_drop_block()
 
@@ -259,12 +276,15 @@ func _update_ui(delta: float) -> void:
 
 	match state:
 		State.CALIB:
-			calib_timer -= delta
-			if not Motion.is_calibrating():
-				calib_panel.visible = false
-				state = State.READY
-			calib_label.text = "가장 편안한 자세로\n기기를 잡으세요\n\n· 보정 중 ·"
 			hint_label.text = ""
+			if awaiting_sensor:
+				calib_label.text = "센서를 켜고\n탑 쌓기를 시작하세요\n\n(모션 권한을 허용해 주세요)"
+			else:
+				calib_timer -= delta
+				if not Motion.is_calibrating():
+					calib_panel.visible = false
+					state = State.READY
+				calib_label.text = "가장 편안한 자세로\n기기를 잡으세요\n\n· 보정 중 ·"
 		State.READY:
 			hint_label.text = "화면을 탭하면 벽돌이 쌓입니다\n기기를 최대한 움직이지 마세요"
 		State.DROPPING:
@@ -320,9 +340,23 @@ func _build_calib_panel() -> void:
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	calib_panel.add_child(center)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 30)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	center.add_child(box)
+
 	calib_label = _make_label("", 42, Color(0.9, 0.88, 0.8))
 	calib_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	center.add_child(calib_label)
+	box.add_child(_centered(calib_label))
+
+	calib_button = Button.new()
+	calib_button.text = "센서 켜기 ▶"
+	calib_button.add_theme_font_size_override("font_size", 40)
+	calib_button.custom_minimum_size = Vector2(320, 96)
+	calib_button.visible = false
+	calib_button.pressed.connect(_on_sensor_enable)
+	box.add_child(_centered(calib_button))
+
 	ui.add_child(calib_panel)
 
 
