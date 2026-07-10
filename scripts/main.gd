@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v2.3 · tiltfloor"
+const GAME_VERSION := "v2.4 · juice"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -19,6 +19,8 @@ const MAX_TILT_ANGLE := 0.42        # 최대 기울임에서 바닥(판자)이 �
 const FOUNDATION_TOP := GROUND_TOP_Y - BLOCK_SIZE.y   # 토대 윗면 Y (수평일 때)
 const TILT_DEADZONE := 0.06         # 이보다 작은 기울기는 무시(미세 손떨림 → 떨림 방지)
 const FLOOR_PIVOT := Vector2(BASE_X, GROUND_TOP_Y)    # 바닥 회전 피벗(토대 중심 바닥)
+const METERS_PER_BLOCK := 5                          # 블록 1개 = 몇 미터
+const MILESTONE_M := 50                              # 이 미터마다 돌파 이펙트
 
 var state: int = State.CALIB
 var score: int = 0
@@ -30,6 +32,9 @@ var floor_body: AnimatableBody2D    # 센서에 따라 좌우로 움직이는 �
 var aiming := false                 # 손을 대고 위치를 조준 중인가
 var aim_x := BASE_X                 # 떨어뜨릴 가로 위치(월드 좌표)
 var drag_start_world := 0.0         # 드래그 시작 지점(상대 이동 기준)
+var show_guides := false            # 안정도바·중심선 표시 (기본 숨김)
+var last_milestone := 0             # 마지막으로 돌파한 미터 구간
+var record_broken := false          # 이번 판에 최고기록을 깼는가
 
 var cam: Camera2D
 var ui: CanvasLayer
@@ -37,6 +42,8 @@ var height_label: Label
 var best_label: Label
 var hint_label: Label
 var stab_fill: ColorRect
+var guides_group: Control
+var guide_btn: Button
 var calib_panel: Control
 var calib_label: Label
 var calib_button: Button
@@ -157,9 +164,60 @@ func _drop_block(at_x: float = BASE_X) -> void:
 	var sy := _tower_top_edge() - BLOCK_SIZE.y * 0.5 - DROP_HEIGHT
 	var b := _make_block(score + 1)
 	b.position = Vector2(at_x, sy)
+	b.landed.connect(_on_block_landed)
 	add_child(b)
 	blocks.append(b)
 	score += 1
+	_check_progress()
+
+
+func _meters() -> int:
+	return score * METERS_PER_BLOCK
+
+
+## 블록이 바닥/탑에 닿는 순간 — 타격감(작은 카메라 킥 + 햅틱). 먼지는 블록이 직접 뿜는다.
+func _on_block_landed() -> void:
+	go_shake = maxf(go_shake, 5.0)
+	Input.vibrate_handheld(12)
+
+
+## 높이 미터 구간 돌파 / 최고 기록 갱신 시 이펙트
+func _check_progress() -> void:
+	var m := _meters()
+	if m >= last_milestone + MILESTONE_M:
+		last_milestone = (m / MILESTONE_M) * MILESTONE_M
+		_popup("%d m 돌파!" % last_milestone, Color(0.45, 0.85, 1.0))
+		go_shake = maxf(go_shake, 9.0)
+		Input.vibrate_handheld(35)
+	if not record_broken and Graveyard.best > 0 and score > Graveyard.best:
+		record_broken = true
+		_popup("최고 기록 갱신!", Color(1.0, 0.82, 0.25))
+		go_shake = maxf(go_shake, 15.0)
+		Input.vibrate_handheld(70)
+
+
+## 화면 중앙 상단에 팝업 텍스트를 띄우고 커졌다 사라지게 한다
+func _popup(text: String, color: Color) -> void:
+	var l := _make_label(text, 62, color)
+	l.size = Vector2(720, 100)
+	l.position = Vector2(0, 430)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.pivot_offset = Vector2(360, 50)
+	l.scale = Vector2(0.5, 0.5)
+	ui.add_child(l)
+	var tw := create_tween()
+	tw.tween_property(l, "scale", Vector2(1.15, 1.15), 0.28) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(l, "position:y", 360.0, 1.3)
+	tw.tween_interval(0.5)
+	tw.tween_property(l, "modulate:a", 0.0, 0.5)
+	tw.tween_callback(l.queue_free)
+
+
+func _toggle_guides() -> void:
+	show_guides = not show_guides
+	guides_group.visible = show_guides
+	guide_btn.text = "가이드 끄기" if show_guides else "가이드"
 
 
 func _top_block() -> Block:
@@ -192,6 +250,8 @@ func _restart() -> void:
 	score = 0
 	aiming = false
 	aim_x = BASE_X
+	last_milestone = 0
+	record_broken = false
 	cam.offset = Vector2.ZERO
 	cam.zoom = Vector2.ONE
 	cam.position = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
@@ -297,11 +357,21 @@ func _draw() -> void:
 		return
 	var top_edge := _tower_top_edge()
 
-	# 1) 중심(원위치) 세로 기준선 — 탑이 얼마나 쏠렸는지 가늠
-	draw_dashed_line(
-		Vector2(BASE_X, top_edge - DROP_HEIGHT - 80.0),
-		Vector2(BASE_X, GROUND_TOP_Y + 40.0),
-		Color(0.55, 0.6, 0.75, 0.22), 2.0, 14.0)
+	# 최고 기록 라인 (목표) — 이 선을 넘으면 기록 갱신 이펙트
+	if Graveyard.best > 0:
+		var ry := FOUNDATION_TOP - float(Graveyard.best) * BLOCK_SIZE.y
+		draw_dashed_line(Vector2(BASE_X - 420, ry), Vector2(BASE_X + 420, ry),
+			Color(1.0, 0.82, 0.3, 0.5), 3.0, 22.0)
+		if ui_font:
+			draw_string(ui_font, Vector2(BASE_X - 400, ry - 14), "최고 기록",
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.82, 0.3, 0.7))
+
+	# 중심(원위치) 세로 기준선 — 가이드 켤 때만
+	if show_guides:
+		draw_dashed_line(
+			Vector2(BASE_X, top_edge - DROP_HEIGHT - 80.0),
+			Vector2(BASE_X, GROUND_TOP_Y + 40.0),
+			Color(0.55, 0.6, 0.75, 0.28), 2.0, 14.0)
 
 	# 2) 조준 중일 때만: 손을 뗄 위치에 고스트 칸 + 바닥까지 내려가는 낙하 컬럼
 	if aiming:
@@ -344,13 +414,14 @@ func _update_camera(delta: float) -> void:
 
 
 func _update_ui(delta: float) -> void:
-	height_label.text = "높이  %d" % score
-	best_label.text = "최고  %d" % Graveyard.best
+	height_label.text = "%d m" % _meters()
+	best_label.text = "최고 %d m" % (maxi(Graveyard.best, score) * METERS_PER_BLOCK)
 
-	# 안정도 = 얼마나 수평인가. 기울일수록(또는 흔들수록) 빨갛게.
-	var inst := clampf(absf(Motion.get_sway()) * 1.1 + Motion.get_shake() * 0.3, 0.0, 1.0)
-	stab_fill.size.x = 300.0 * clampf(1.0 - inst, 0.02, 1.0)
-	stab_fill.color = Color(0.32, 0.85, 0.45).lerp(Color(0.92, 0.26, 0.26), inst)
+	if show_guides:
+		# 안정도 = 얼마나 수평인가. 기울일수록 빨갛게.
+		var inst := clampf(absf(Motion.get_sway()) * 1.1, 0.0, 1.0)
+		stab_fill.size.x = 300.0 * clampf(1.0 - inst, 0.02, 1.0)
+		stab_fill.color = Color(0.32, 0.85, 0.45).lerp(Color(0.92, 0.26, 0.26), inst)
 
 	match state:
 		State.CALIB:
@@ -378,30 +449,48 @@ func _build_ui() -> void:
 	ui = CanvasLayer.new()
 	add_child(ui)
 
-	height_label = _make_label("높이  0", 46, Color(0.95, 0.93, 0.85))
-	height_label.position = Vector2(40, 44)
+	# 현재 높이 (미터) — 좌상단, 크게
+	height_label = _make_label("0 m", 58, Color(0.97, 0.95, 0.86))
+	height_label.position = Vector2(40, 40)
 	ui.add_child(height_label)
 
-	best_label = _make_label("최고  0", 30, Color(0.6, 0.62, 0.7))
-	best_label.position = Vector2(440, 54)
-	best_label.size = Vector2(240, 40)
+	# 최고 기록 (미터) — 우상단
+	best_label = _make_label("최고 0 m", 30, Color(0.82, 0.7, 0.35))
+	best_label.position = Vector2(380, 56)
+	best_label.size = Vector2(300, 40)
 	best_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	ui.add_child(best_label)
 
-	# 안정도 바
+	# 안정도·중심선 묶음 (기본 숨김, 버튼으로 토글)
+	guides_group = Control.new()
+	guides_group.set_anchors_preset(Control.PRESET_FULL_RECT)
+	guides_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	guides_group.visible = show_guides
+	ui.add_child(guides_group)
 	var stab_bg := ColorRect.new()
 	stab_bg.color = Color(0.16, 0.17, 0.22)
-	stab_bg.position = Vector2(210, 128)
-	stab_bg.size = Vector2(300, 18)
-	ui.add_child(stab_bg)
+	stab_bg.position = Vector2(210, 132)
+	stab_bg.size = Vector2(300, 16)
+	guides_group.add_child(stab_bg)
 	stab_fill = ColorRect.new()
 	stab_fill.color = Color(0.32, 0.85, 0.45)
-	stab_fill.position = Vector2(210, 128)
-	stab_fill.size = Vector2(300, 18)
-	ui.add_child(stab_fill)
+	stab_fill.position = Vector2(210, 132)
+	stab_fill.size = Vector2(300, 16)
+	guides_group.add_child(stab_fill)
 	var stab_cap := _make_label("안정도", 22, Color(0.55, 0.57, 0.65))
-	stab_cap.position = Vector2(210, 148)
-	ui.add_child(stab_cap)
+	stab_cap.position = Vector2(210, 150)
+	guides_group.add_child(stab_cap)
+
+	# 가이드 on/off 토글 버튼 (우상단)
+	guide_btn = Button.new()
+	guide_btn.text = "가이드"
+	guide_btn.add_theme_font_override("font", ui_font)
+	guide_btn.add_theme_font_size_override("font_size", 24)
+	guide_btn.position = Vector2(548, 108)
+	guide_btn.size = Vector2(132, 52)
+	guide_btn.focus_mode = Control.FOCUS_NONE
+	guide_btn.pressed.connect(_toggle_guides)
+	ui.add_child(guide_btn)
 
 	# 하단 힌트
 	hint_label = _make_label("", 30, Color(0.78, 0.8, 0.88))

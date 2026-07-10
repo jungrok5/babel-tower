@@ -4,8 +4,11 @@ class_name Block
 ## 물리 강체이지만, 기기가 "정지" 상태이면 마찰로 안정적으로 쌓인다.
 ## 흔들리는 순간 상단 벽돌부터 회전하며 무너진다.
 
+signal landed                       ## 처음 무언가에 닿는 순간(=착지) 발생
+
 var block_size: Vector2 = Vector2(180.0, 62.0)
 var block_color: Color = Color(0.82, 0.76, 0.62)
+var _landed := false
 
 
 func setup(size: Vector2, color: Color) -> void:
@@ -37,7 +40,48 @@ func _ready() -> void:
 	can_sleep = true
 	# 빠르게 떨어질 때 벽돌이 서로를 뚫고 지나가는 것 방지
 	continuous_cd = RigidBody2D.CCD_MODE_CAST_SHAPE
+	# 착지 감지용 접촉 모니터
+	contact_monitor = true
+	max_contacts_reported = 4
+	body_entered.connect(_on_body_entered)
 	queue_redraw()
+
+
+func _on_body_entered(_body: Node) -> void:
+	if _landed:
+		return
+	_landed = true
+	_spawn_dust()
+	_flash()
+	landed.emit()
+
+
+## 착지 먼지 파티클 (타격감)
+func _spawn_dust() -> void:
+	var p := CPUParticles2D.new()
+	p.position = Vector2(0, block_size.y * 0.5)   # 블록 아랫변
+	p.emitting = true
+	p.one_shot = true
+	p.explosiveness = 0.9
+	p.amount = 14
+	p.lifetime = 0.5
+	p.direction = Vector2(0, -1)
+	p.spread = 70.0
+	p.gravity = Vector2(0, 500)
+	p.initial_velocity_min = 70.0
+	p.initial_velocity_max = 170.0
+	p.scale_amount_min = 2.0
+	p.scale_amount_max = 5.0
+	p.color = block_color.lightened(0.1)
+	add_child(p)
+	get_tree().create_timer(1.2).timeout.connect(p.queue_free)
+
+
+## 착지 순간 밝게 번쩍
+func _flash() -> void:
+	self_modulate = Color(1.5, 1.45, 1.3)
+	var tw := create_tween()
+	tw.tween_property(self, "self_modulate", Color.WHITE, 0.18)
 
 
 func _draw() -> void:
