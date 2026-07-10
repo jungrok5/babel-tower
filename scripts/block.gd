@@ -27,6 +27,10 @@ func _ready() -> void:
 	physics_material_override = mat
 
 	mass = 2.0
+	# 중력은 main이 매 프레임 '기울인 방향'으로 직접 넣는다(gravity_scale=0).
+	# 이렇게 하면 블록이 잠들지 않고 기울기에 계속 반응한다.
+	gravity_scale = 0.0
+	can_sleep = false
 	# 빠르게 떨어질 때 벽돌이 서로를 뚫고 지나가는 것 방지
 	continuous_cd = RigidBody2D.CCD_MODE_CAST_SHAPE
 	queue_redraw()
