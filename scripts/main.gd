@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v2.0 · floor"
+const GAME_VERSION := "v2.1 · floor2"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -321,11 +321,10 @@ func _update_camera(delta: float) -> void:
 	var z := clampf(1.0 - float(score) * 0.03, 0.42, 1.0)
 	cam.zoom = cam.zoom.lerp(Vector2(z, z), 0.05)
 
-	# 흔들림/붕괴 카메라 셰이크
+	# 카메라 셰이크는 '붕괴 순간'에만. (예전엔 센서 움직임에 반응해 화면이 위아래로
+	# 떨렸는데 그게 위아래 떨림의 원인이었다 — 제거)
 	go_shake = maxf(0.0, go_shake - delta * 45.0)
-	var amp := Motion.get_shake() * 12.0 + go_shake
-	if state == State.CALIB:
-		amp = 0.0
+	var amp := go_shake
 	cam.offset = Vector2(randf_range(-amp, amp), randf_range(-amp, amp))
 
 

@@ -17,12 +17,12 @@ func _ready() -> void:
 	await _build_to(5)
 	await _steps(300)                 # 완전 안착 대기
 	var r1 := await _measure(90)
-	print("[TEST] SMALL(5):  steady jitter=%.3f px  sleeping=%d/%d" % [r1.j, r1.s, main.blocks.size()])
+	print("[TEST] SMALL(5):  jitter x=%.3f y=%.3f px  sleeping=%d/%d" % [r1.jx, r1.jy, r1.s, main.blocks.size()])
 
 	await _build_to(25)
 	await _steps(300)
 	var r2 := await _measure(90)
-	print("[TEST] TALL(25):  steady jitter=%.3f px  sleeping=%d/%d" % [r2.j, r2.s, main.blocks.size()])
+	print("[TEST] TALL(25):  jitter x=%.3f y=%.3f px  sleeping=%d/%d" % [r2.jx, r2.jy, r2.s, main.blocks.size()])
 
 	get_tree().quit()
 
@@ -34,27 +34,30 @@ func _build_to(n: int) -> void:
 
 
 func _measure(n: int) -> Dictionary:
+	# x·y 둘 다 측정 (위아래 떨림도 잡기 위해)
 	var lo := {}
 	var hi := {}
 	for k in range(n):
 		for idx in main.blocks.size():
 			var b = main.blocks[idx]
 			if is_instance_valid(b):
-				var x: float = b.position.x
+				var p: Vector2 = b.position
 				if not lo.has(idx):
-					lo[idx] = x
-					hi[idx] = x
-				lo[idx] = minf(lo[idx], x)
-				hi[idx] = maxf(hi[idx], x)
+					lo[idx] = p
+					hi[idx] = p
+				lo[idx] = Vector2(minf(lo[idx].x, p.x), minf(lo[idx].y, p.y))
+				hi[idx] = Vector2(maxf(hi[idx].x, p.x), maxf(hi[idx].y, p.y))
 		await get_tree().physics_frame
-	var j := 0.0
+	var jx := 0.0
+	var jy := 0.0
 	for idx in lo:
-		j = maxf(j, hi[idx] - lo[idx])
+		jx = maxf(jx, hi[idx].x - lo[idx].x)
+		jy = maxf(jy, hi[idx].y - lo[idx].y)
 	var s := 0
 	for b in main.blocks:
 		if is_instance_valid(b) and b is RigidBody2D and b.sleeping:
 			s += 1
-	return {"j": j, "s": s}
+	return {"jx": jx, "jy": jy, "s": s}
 
 
 func _steps(n: int) -> void:

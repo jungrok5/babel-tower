@@ -21,8 +21,9 @@ func _ready() -> void:
 	add_child(cs)
 
 	var mat := PhysicsMaterial.new()
-	# 마찰을 낮춰 기울일 때 스택이 '스르륵' 쏠려 보이게 한다(너무 높으면 뻣뻣하다 갑자기 붕괴).
-	mat.friction = 0.6
+	# 마찰을 높여 바닥을 살살 움직이면 탑이 함께 따라오고(안 미끄러짐),
+	# 급하게 움직여야 관성으로 뒤처져 무너지게 한다.
+	mat.friction = 1.0
 	mat.bounce = 0.0
 	physics_material_override = mat
 
