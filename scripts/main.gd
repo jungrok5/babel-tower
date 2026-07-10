@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v0.7 · rapid"
+const GAME_VERSION := "v0.8 · guides"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -187,10 +187,10 @@ func _restart() -> void:
 # ---------------------------------------------------------------- 입력
 
 func _unhandled_input(event: InputEvent) -> void:
+	# 터치는 emulate_mouse_from_touch로 마우스 이벤트가 되므로 마우스 버튼만 처리한다.
+	# (터치+마우스 둘 다 받으면 한 번에 두 개가 떨어진다)
 	var tapped := false
-	if event is InputEventScreenTouch and event.pressed:
-		tapped = true
-	elif event is InputEventMouseButton and event.pressed \
+	if event is InputEventMouseButton and event.pressed \
 			and event.button_index == MOUSE_BUTTON_LEFT:
 		tapped = true
 	elif event is InputEventKey and event.pressed and not event.echo \
@@ -199,7 +199,6 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not tapped:
 		return
 
-	# 웹 모션 권한은 보정 화면의 "센서 켜기" 버튼에서 처리한다.
 	if state == State.READY:
 		_drop_block()
 
@@ -247,6 +246,34 @@ func _tower_top_edge() -> float:
 func _process(delta: float) -> void:
 	_update_camera(delta)
 	_update_ui(delta)
+	queue_redraw()  # 낙하 위치/중심 가이드 갱신
+
+
+## 월드 좌표에 그리는 가이드 (블록 뒤에 렌더링된다)
+func _draw() -> void:
+	if state != State.READY:
+		return
+	var top_edge := _tower_top_edge()
+
+	# 1) 중심(원위치) 세로 기준선 — 탑이 얼마나 쏠렸는지 가늠
+	draw_dashed_line(
+		Vector2(BASE_X, top_edge - DROP_HEIGHT - 80.0),
+		Vector2(BASE_X, GROUND_TOP_Y + 40.0),
+		Color(0.55, 0.6, 0.75, 0.22), 2.0, 14.0)
+
+	# 2) 다음 벽돌이 떨어질 위치 (꼭대기 블록 바로 위) — 고스트 + 낙하 컬럼
+	var top := _top_block()
+	var sx := BASE_X
+	var sy := GROUND_TOP_Y - BLOCK_SIZE.y * 0.5 - DROP_HEIGHT
+	if top != null:
+		sx = top.position.x
+		sy = top.position.y - top.block_size.y * 0.5 - DROP_HEIGHT
+	var ghost := Rect2(Vector2(sx, sy) - BLOCK_SIZE * 0.5, BLOCK_SIZE)
+	draw_rect(ghost, Color(0.96, 0.9, 0.6, 0.28), false, 2.0)
+	draw_dashed_line(
+		Vector2(sx, sy + BLOCK_SIZE.y * 0.5),
+		Vector2(sx, sy + DROP_HEIGHT + BLOCK_SIZE.y * 0.5),
+		Color(0.96, 0.9, 0.6, 0.35), 2.0, 10.0)
 
 
 func _update_camera(delta: float) -> void:
@@ -288,7 +315,7 @@ func _update_ui(delta: float) -> void:
 					state = State.READY
 				calib_label.text = "가장 편안한 자세로\n기기를 잡으세요\n\n· 보정 중 ·"
 		State.READY:
-			hint_label.text = "탭해서 계속 쌓으세요\n기기를 수평으로 — 기울면 탑이 쏠립니다"
+			hint_label.text = "탭해서 계속 쌓으세요 (노란칸=낙하 위치, 점선=중심)\n기기를 수평으로 — 기울면 탑이 쏠립니다"
 		State.OVER:
 			hint_label.text = ""
 
