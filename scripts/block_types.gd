@@ -42,6 +42,24 @@ static func all() -> Array:
 			],
 		},
 		{
+			"id": "book", "name": "책",
+			"bbox": Vector2(196, 46), "friction": 0.5,
+			"parts": [
+				{"kind": "rect", "rect": Rect2(-98, -23, 196, 46), "color": Color(0.62, 0.24, 0.24)},
+				{"kind": "rect", "rect": Rect2(-92, -16, 184, 8), "color": Color(0.90, 0.87, 0.78)},
+				{"kind": "rect", "rect": Rect2(-92, 8, 184, 8), "color": Color(0.90, 0.87, 0.78)},
+			],
+		},
+		{
+			"id": "log", "name": "통나무",
+			"bbox": Vector2(214, 58), "friction": 0.46,
+			"parts": [
+				{"kind": "rect", "rect": Rect2(-78, -29, 156, 58), "color": Color(0.55, 0.38, 0.22)},
+				{"kind": "circle", "pos": Vector2(-78, 0), "r": 29.0, "color": Color(0.62, 0.44, 0.27)},
+				{"kind": "circle", "pos": Vector2(78, 0), "r": 29.0, "color": Color(0.62, 0.44, 0.27)},
+			],
+		},
+		{
 			"id": "ball", "name": "공",
 			"bbox": Vector2(112, 112), "friction": 0.58,
 			"parts": [

@@ -7,7 +7,8 @@ extends Node2D
 enum State { CALIB, READY, OVER, SELECT, TUTORIAL }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v3.3 · tutorial"
+const GAME_VERSION := "v3.4 · i18n"
+const ROTATE_STEP := PI * 0.25       # 두 손가락 탭 1회 = 45°
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -73,6 +74,14 @@ var lb_panel: Control                # 랭킹(리더보드) 오버레이
 var lb_rows: VBoxContainer           # 랭킹 행 목록
 var lb_title: Label
 var lb_view := 0                     # 랭킹에서 보고 있는 블록 타입 인덱스
+var lb_icon: Control                 # 랭킹 헤더의 블록 미리보기 아이콘
+var settings_panel: Control          # 설정 오버레이
+var settings_body: VBoxContainer     # 설정 항목 목록
+var lang_panel: Control              # 언어 선택 오버레이
+var lang_rows: VBoxContainer         # 언어 목록
+var lang_search: LineEdit            # 언어 검색창
+var record_img: Image = null         # 최고기록 갱신 순간의 스크린샷
+var _want_capture := false           # 다음 프레임에 기록 스크린샷 캡처
 var calib_panel: Control
 var calib_label: Label
 var calib_button: Button
@@ -122,6 +131,8 @@ func _build_audio() -> void:
 
 
 func _play(name: String, pitch_var := 0.0) -> void:
+	if not Settings.sound_on:
+		return
 	if sfx.has(name):
 		var p: AudioStreamPlayer = sfx[name]
 		p.pitch_scale = 1.0 + randf_range(-pitch_var, pitch_var)
@@ -310,9 +321,9 @@ func _block_top_y(b: Block) -> float:
 	return b.position.y - ext
 
 
-## 놓을 블록을 90° 회전 (두 손가락 탭)
+## 놓을 블록을 45° 회전 (두 손가락 탭)
 func _rotate_block() -> void:
-	aim_rot = fmod(aim_rot + PI * 0.5, TAU)
+	aim_rot = fmod(aim_rot + ROTATE_STEP, TAU)
 
 
 ## (개발용) 자이로 잠금 토글 — 바닥을 수평 고정해 '어디까지 쌓이나' 확인용
@@ -347,7 +358,7 @@ func _peak_meters() -> int:
 func _on_block_landed() -> void:
 	settling = null                     # 닿았다 → 다음 블록 허용
 	go_shake = maxf(go_shake, 5.0)
-	Input.vibrate_handheld(12)
+	_vibe(12)
 	_play("place", 0.14)
 	_check_progress()
 
@@ -357,17 +368,24 @@ func _check_progress() -> void:
 	var m := _meters()
 	if m >= last_milestone + MILESTONE_M:
 		last_milestone = (m / MILESTONE_M) * MILESTONE_M
-		_popup("%d m 돌파!" % last_milestone, Color(0.45, 0.85, 1.0))
+		_popup(Locale.t("milestone") % last_milestone, Color(0.45, 0.85, 1.0))
 		go_shake = maxf(go_shake, 9.0)
-		Input.vibrate_handheld(35)
+		_vibe(35)
 		_play("milestone")
 	var best := Graveyard.best_for(current_type.get("id", "brick"))
 	if not record_broken and best > 0 and _peak_meters() > best:
 		record_broken = true
-		_popup("최고 기록 갱신!", Color(1.0, 0.82, 0.25))
+		_popup(Locale.t("record_break"), Color(1.0, 0.82, 0.25))
 		go_shake = maxf(go_shake, 15.0)
-		Input.vibrate_handheld(70)
+		_vibe(70)
 		_play("record")
+		_want_capture = true            # 이 순간 스크린샷 캡처(다음 프레임)
+
+
+## 진동(설정에 따라 켜짐/꺼짐)
+func _vibe(ms: int) -> void:
+	if Settings.haptic_on:
+		Input.vibrate_handheld(ms)
 
 
 ## 화면 중앙 상단에 팝업 텍스트를 띄우고 커졌다 사라지게 한다
@@ -413,12 +431,31 @@ func _game_over() -> void:
 		bird.queue_free()
 	bird = null
 	_play("collapse")
-	Input.vibrate_handheld(400)         # 붕괴의 햅틱
+	_vibe(400)                          # 붕괴의 햅틱
 	Graveyard.add_record(current_type.get("id", "brick"), _peak_meters())
-	# 붕괴 장면(줌아웃)을 잠깐 보여준 뒤 결과 화면을 띄운다
-	await get_tree().create_timer(1.7).timeout
+	# 완전히 다 무너지는 장면(줌아웃)을 끝까지 보여준 뒤 결과 화면을 띄운다
+	await _wait_collapse_settled()
 	if state == State.OVER:             # 그 사이 재시작하지 않았다면
 		_show_game_over()
+
+
+## 블록들이 다 무너져 대부분 멈출 때까지(최대 5초) 기다린다
+func _wait_collapse_settled() -> void:
+	var frames := 0
+	var still_for := 0
+	while state == State.OVER and frames < 600:      # 최대 ~5초
+		await get_tree().physics_frame
+		frames += 1
+		if frames < 36:
+			continue
+		var moving := false
+		for b in blocks:
+			if is_instance_valid(b) and b is RigidBody2D and b.linear_velocity.length() > 24.0:
+				moving = true
+				break
+		still_for = still_for + 1 if not moving else 0
+		if still_for > 42:                            # ~0.35초 정지 유지되면 종료
+			break
 
 
 func _restart() -> void:
@@ -435,6 +472,8 @@ func _restart() -> void:
 	mod_index = -1
 	last_milestone = 0
 	record_broken = false
+	record_img = null
+	_want_capture = false
 	wind_cur = 0.0
 	wind_target = 0.0
 	wind_gusting = false
@@ -663,11 +702,24 @@ func _process(delta: float) -> void:
 	if wind_fx != null:
 		wind_fx.wind = wind_cur
 	if amb_wind != null:
-		var tv := lerpf(-60.0, -13.0, clampf((float(_meters()) - 60.0) / 500.0, 0.0, 1.0))
+		var tv := -80.0
+		if Settings.sound_on:
+			tv = lerpf(-60.0, -13.0, clampf((float(_meters()) - 60.0) / 500.0, 0.0, 1.0))
 		amb_wind.volume_db = lerpf(amb_wind.volume_db, tv, 0.04)
 	_update_camera(delta)
 	_update_ui(delta)
 	queue_redraw()  # 낙하 위치/중심 가이드 갱신
+	if _want_capture:
+		_want_capture = false
+		_capture_record()
+
+
+## 최고기록 순간의 화면을 이미지로 저장(끝나고 공유용)
+func _capture_record() -> void:
+	await RenderingServer.frame_post_draw
+	var img := get_viewport().get_texture().get_image()
+	if img != null:
+		record_img = img
 
 
 ## 월드 좌표에 그리는 가이드 (블록 뒤에 렌더링된다)
@@ -743,7 +795,7 @@ func _update_camera(delta: float) -> void:
 
 func _update_ui(delta: float) -> void:
 	height_label.text = "%d m" % _meters()
-	best_label.text = "최고 %d m" % maxi(Graveyard.best_for(current_type.get("id", "brick")), _peak_meters())
+	best_label.text = "%s %d m" % [Locale.t("best_short"), maxi(Graveyard.best_for(current_type.get("id", "brick")), _peak_meters())]
 
 	if show_guides:
 		# 안정도 = 얼마나 수평인가. 기울일수록 빨갛게.
@@ -755,15 +807,15 @@ func _update_ui(delta: float) -> void:
 		State.CALIB:
 			hint_label.text = ""
 			if awaiting_sensor:
-				calib_label.text = "센서를 켜고\n탑 쌓기를 시작하세요\n\n(모션 권한을 허용해 주세요)"
+				calib_label.text = Locale.t("sensor_prompt")
 			else:
 				calib_timer -= delta
 				if not Motion.is_calibrating():
 					calib_panel.visible = false
 					state = State.READY
-				calib_label.text = "가장 편안한 자세로\n기기를 잡으세요\n\n· 보정 중 ·"
+				calib_label.text = Locale.t("calib_wait")
 		State.READY:
-			hint_label.text = "끌어서 위치 정하고 떼면 낙하 · 두 손가락 탭 = 90° 회전\n기기를 수평으로 — 기울이면 바닥이 움직여 탑이 쏠립니다"
+			hint_label.text = Locale.t("hint_play")
 		State.OVER:
 			hint_label.text = ""
 		State.SELECT:
@@ -775,8 +827,8 @@ func _update_ui(delta: float) -> void:
 # ---------------------------------------------------------------- UI 구성
 
 func _build_ui() -> void:
-	# 한글 글리프가 포함된 폰트 (기본 폰트엔 한글이 없어 '두부'로 깨진다)
-	ui_font = load("res://fonts/NanumGothic-Regular.ttf")
+	# 다국어(라틴+한글+일본어) 예쁜 폰트
+	ui_font = load("res://fonts/Pretendard-Regular.otf")
 
 	ui = CanvasLayer.new()
 	ui.layer = 5                     # 전경 바람 이펙트(layer 1)보다 위에 UI가 오도록
@@ -850,6 +902,8 @@ func _build_ui() -> void:
 
 	_build_select_panel()
 	_build_leaderboard_panel()
+	_build_settings_panel()
+	_build_language_panel()
 	_build_calib_panel()
 	_build_over_panel()
 
@@ -870,22 +924,22 @@ func _build_select_panel() -> void:
 	emblem.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_child(_centered(emblem))
 	box.add_child(_centered(_make_label("GENESIS 11", 40, Color(0.86, 0.78, 0.55))))
-	box.add_child(_centered(_make_label("창세기 11장 · 무엇을 쌓을까요?", 30, Color(0.7, 0.72, 0.8))))
-	box.add_child(_centered(_make_label(
-		"블록마다 난이도와 최고 기록이 따로 관리됩니다", 26, Color(0.6, 0.63, 0.72))))
+	box.add_child(_centered(_make_label(Locale.t("select_title"), 32, Color(0.9, 0.9, 0.82))))
+	box.add_child(_centered(_make_label(Locale.t("select_sub"), 24, Color(0.6, 0.63, 0.72))))
 	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 22)
-	grid.add_theme_constant_override("v_separation", 22)
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 18)
+	grid.add_theme_constant_override("v_separation", 18)
 	box.add_child(_centered(grid))
 	for t in BlockTypes.all():
 		grid.add_child(_make_type_tile(t))
-	box.add_child(_spacer(4))
+	box.add_child(_spacer(2))
 	var actions := HBoxContainer.new()
 	actions.alignment = BoxContainer.ALIGNMENT_CENTER
-	actions.add_theme_constant_override("separation", 16)
-	actions.add_child(_make_text_button("랭킹 보기", 28, Vector2(210, 64), _open_leaderboard))
-	actions.add_child(_make_text_button("조작법", 28, Vector2(160, 64), _replay_tutorial))
+	actions.add_theme_constant_override("separation", 14)
+	actions.add_child(_make_text_button(Locale.t("view_leaderboard"), 26, Vector2(200, 60), _open_leaderboard))
+	actions.add_child(_make_text_button(Locale.t("how_to"), 26, Vector2(150, 60), _replay_tutorial))
+	actions.add_child(_make_text_button(Locale.t("settings"), 26, Vector2(150, 60), _open_settings))
 	box.add_child(_centered(actions))
 	ui.add_child(select_panel)
 
@@ -903,13 +957,20 @@ func _make_type_tile(t: Dictionary) -> Button:
 	icon.size = Vector2(120, 112)
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	b.add_child(icon)
-	var lb := _make_label(t["name"], 30, Color(0.93, 0.9, 0.82))
+	var lb := _make_label(_type_name(t), 28, Color(0.93, 0.9, 0.82))
 	lb.position = Vector2(0, 126)
 	lb.size = Vector2(212, 40)
 	lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	b.add_child(lb)
 	return b
+
+
+## 블록 타입의 현지화된 이름 (없으면 기본 name)
+func _type_name(t: Dictionary) -> String:
+	var key := "blk_" + str(t.get("id", ""))
+	var s := Locale.t(key)
+	return s if s != key else str(t.get("name", "?"))
 
 
 # ---------------------------------------------------------------- 랭킹(리더보드)
@@ -927,16 +988,20 @@ func _build_leaderboard_panel() -> void:
 	box.custom_minimum_size = Vector2(640, 0)
 	center.add_child(box)
 
-	# 헤더: ◀  랭킹 · [타입]  ▶
+	# 헤더: <  [블록아이콘] 랭킹·이름  >
 	var header := HBoxContainer.new()
 	header.alignment = BoxContainer.ALIGNMENT_CENTER
-	header.add_theme_constant_override("separation", 18)
-	header.add_child(_make_text_button("<", 40, Vector2(70, 66), _lb_prev))
-	lb_title = _make_label("랭킹", 38, Color(0.98, 0.86, 0.4))
-	lb_title.custom_minimum_size = Vector2(360, 0)
+	header.add_theme_constant_override("separation", 12)
+	header.add_child(_make_text_button("<", 40, Vector2(64, 66), _lb_prev))
+	lb_icon = load("res://scripts/type_icon.gd").new()
+	lb_icon.custom_minimum_size = Vector2(64, 64)
+	lb_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header.add_child(lb_icon)
+	lb_title = _make_label(Locale.t("leaderboard"), 36, Color(0.98, 0.86, 0.4))
+	lb_title.custom_minimum_size = Vector2(300, 0)
 	lb_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	header.add_child(lb_title)
-	header.add_child(_make_text_button(">", 40, Vector2(70, 66), _lb_next))
+	header.add_child(_make_text_button(">", 40, Vector2(64, 66), _lb_next))
 	box.add_child(header)
 
 	box.add_child(_lb_header_row())
@@ -945,7 +1010,7 @@ func _build_leaderboard_panel() -> void:
 	box.add_child(lb_rows)
 
 	box.add_child(_spacer(10))
-	box.add_child(_centered(_make_text_button("닫기", 30, Vector2(240, 66), _close_leaderboard)))
+	box.add_child(_centered(_make_text_button(Locale.t("close"), 30, Vector2(240, 66), _close_leaderboard)))
 	ui.add_child(lb_panel)
 
 
@@ -953,9 +1018,9 @@ func _lb_header_row() -> Control:
 	var row := HBoxContainer.new()
 	row.custom_minimum_size = Vector2(600, 40)
 	var c := Color(0.55, 0.58, 0.66)
-	row.add_child(_lb_cell("순위", 24, c, 90, HORIZONTAL_ALIGNMENT_CENTER))
-	row.add_child(_lb_cell("이름", 24, c, 330, HORIZONTAL_ALIGNMENT_LEFT))
-	row.add_child(_lb_cell("높이", 24, c, 180, HORIZONTAL_ALIGNMENT_RIGHT))
+	row.add_child(_lb_cell(Locale.t("col_rank"), 24, c, 90, HORIZONTAL_ALIGNMENT_CENTER))
+	row.add_child(_lb_cell(Locale.t("col_name"), 24, c, 330, HORIZONTAL_ALIGNMENT_LEFT))
+	row.add_child(_lb_cell(Locale.t("col_height"), 24, c, 180, HORIZONTAL_ALIGNMENT_RIGHT))
 	return row
 
 
@@ -998,10 +1063,13 @@ func _type_index(id: String) -> int:
 ## 목업 랭킹을 다시 그린다. 내 최고 기록이 있으면 내 자리를 끼워 강조한다.
 func _refresh_leaderboard() -> void:
 	var t: Dictionary = BlockTypes.all()[lb_view]
-	lb_title.text = "랭킹 · %s" % t["name"]
+	lb_title.text = "%s · %s" % [Locale.t("leaderboard"), _type_name(t)]
+	if lb_icon != null:
+		lb_icon.type_def = t
+		lb_icon.queue_redraw()
 	for c in lb_rows.get_children():
 		c.queue_free()
-	var rows: Array = Leaderboard.entries(t["id"], Graveyard.best_for(t["id"]))
+	var rows: Array = Leaderboard.entries(t["id"], Graveyard.best_for(t["id"]), Locale.t("you"))
 	var me_row: Dictionary = {}
 	var count := 0
 	for e in rows:
@@ -1029,11 +1097,187 @@ func _lb_entry_row(e: Dictionary) -> Control:
 		col = Color(0.82, 0.85, 0.92)
 	elif rank == 3:
 		col = Color(0.86, 0.66, 0.45)
-	var name_txt: String = ("> " + str(e["name"]) + " (나)") if e["me"] else str(e["name"])
+	var name_txt: String = ("> " + str(e["name"])) if e["me"] else str(e["name"])
 	row.add_child(_lb_cell("%d" % rank, 30, col, 90, HORIZONTAL_ALIGNMENT_CENTER))
 	row.add_child(_lb_cell(name_txt, 30, col, 330, HORIZONTAL_ALIGNMENT_LEFT))
 	row.add_child(_lb_cell("%d m" % int(e["m"]), 30, col, 180, HORIZONTAL_ALIGNMENT_RIGHT))
 	return row
+
+
+# ---------------------------------------------------------------- 설정 / 언어
+
+func _build_settings_panel() -> void:
+	settings_panel = _make_overlay(Color(0.03, 0.04, 0.07, 0.98))
+	settings_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	settings_panel.visible = false
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	settings_panel.add_child(center)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 16)
+	box.custom_minimum_size = Vector2(600, 0)
+	center.add_child(box)
+	box.add_child(_centered(_make_label(Locale.t("settings"), 44, Color(0.95, 0.92, 0.82))))
+	box.add_child(_spacer(6))
+	settings_body = VBoxContainer.new()
+	settings_body.add_theme_constant_override("separation", 12)
+	box.add_child(settings_body)
+	box.add_child(_spacer(10))
+	box.add_child(_centered(_make_text_button(Locale.t("close"), 30, Vector2(240, 66), _close_settings)))
+	ui.add_child(settings_panel)
+
+
+func _refresh_settings() -> void:
+	for c in settings_body.get_children():
+		c.queue_free()
+	var green := Color(0.4, 0.85, 0.5)
+	var gray := Color(0.6, 0.62, 0.7)
+	settings_body.add_child(_settings_row(Locale.t("sound"),
+		Locale.t("on") if Settings.sound_on else Locale.t("off"),
+		green if Settings.sound_on else gray, _toggle_sound))
+	settings_body.add_child(_settings_row(Locale.t("haptic"),
+		Locale.t("on") if Settings.haptic_on else Locale.t("off"),
+		green if Settings.haptic_on else gray, _toggle_haptic))
+	var cur := _lang_native(Locale.lang)
+	settings_body.add_child(_settings_row(Locale.t("language"), cur, Color(0.8, 0.85, 0.95), _open_language))
+	settings_body.add_child(_settings_row(Locale.t("google_play"),
+		Locale.t("connected") if Settings.gp_connected else Locale.t("connect"),
+		green if Settings.gp_connected else gray, _toggle_gp))
+
+
+func _settings_row(label: String, value: String, vcol: Color, cb: Callable) -> Control:
+	var row := HBoxContainer.new()
+	row.custom_minimum_size = Vector2(560, 68)
+	var l := _make_label(label, 32, Color(0.9, 0.9, 0.85))
+	l.custom_minimum_size = Vector2(300, 0)
+	row.add_child(l)
+	var b := _make_text_button(value, 28, Vector2(240, 60), cb)
+	b.add_theme_color_override("font_color", vcol)
+	row.add_child(b)
+	return row
+
+
+func _open_settings() -> void:
+	_refresh_settings()
+	ui.move_child(settings_panel, ui.get_child_count() - 1)
+	settings_panel.visible = true
+
+
+func _close_settings() -> void:
+	settings_panel.visible = false
+
+
+func _toggle_sound() -> void:
+	Settings.set_sound(not Settings.sound_on)
+	_refresh_settings()
+
+
+func _toggle_haptic() -> void:
+	Settings.set_haptic(not Settings.haptic_on)
+	_vibe(20)
+	_refresh_settings()
+
+
+func _toggle_gp() -> void:
+	# 목업: 나중에 Google Play Games 로그인 연동
+	Settings.set_gp(not Settings.gp_connected)
+	_refresh_settings()
+
+
+func _lang_native(code: String) -> String:
+	for l in Locale.LANGUAGES:
+		if l[0] == code:
+			return l[1]
+	return code
+
+
+# ---- 언어 선택 (검색 포함, 100개국 대비) ----
+
+func _build_language_panel() -> void:
+	lang_panel = _make_overlay(Color(0.03, 0.04, 0.07, 0.99))
+	lang_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	lang_panel.visible = false
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	lang_panel.add_child(center)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 14)
+	box.custom_minimum_size = Vector2(600, 0)
+	center.add_child(box)
+	box.add_child(_centered(_make_label(Locale.t("language"), 42, Color(0.95, 0.92, 0.82))))
+	lang_search = LineEdit.new()
+	lang_search.placeholder_text = Locale.t("search")
+	if ui_font:
+		lang_search.add_theme_font_override("font", ui_font)
+	lang_search.add_theme_font_size_override("font_size", 30)
+	lang_search.custom_minimum_size = Vector2(560, 66)
+	lang_search.text_changed.connect(func(_s): _refresh_language())
+	box.add_child(_centered(lang_search))
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(600, 760)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	box.add_child(scroll)
+	lang_rows = VBoxContainer.new()
+	lang_rows.add_theme_constant_override("separation", 8)
+	lang_rows.custom_minimum_size = Vector2(580, 0)
+	scroll.add_child(lang_rows)
+	box.add_child(_centered(_make_text_button(Locale.t("close"), 28, Vector2(220, 60), _close_language)))
+	ui.add_child(lang_panel)
+
+
+func _refresh_language() -> void:
+	var q := lang_search.text.strip_edges() if lang_search != null else ""
+	for c in lang_rows.get_children():
+		c.queue_free()
+	for l in Locale.LANGUAGES:
+		var code: String = l[0]
+		var native: String = l[1]
+		var eng: String = l[2]
+		if q != "" and native.findn(q) == -1 and eng.findn(q) == -1 and code.findn(q) == -1:
+			continue
+		lang_rows.add_child(_lang_row(code, native, eng))
+
+
+func _lang_row(code: String, native: String, eng: String) -> Control:
+	var ready := Locale.is_ready(code)
+	var txt := "%s   ·   %s" % [native, eng]
+	if not ready:
+		txt += "   (soon)"
+	var b := _make_text_button(txt, 30, Vector2(560, 68), _pick_language.bind(code))
+	if code == Locale.lang:
+		b.add_theme_color_override("font_color", Color(1.0, 0.84, 0.32))
+	elif not ready:
+		b.add_theme_color_override("font_color", Color(0.55, 0.57, 0.64))
+	return b
+
+
+func _pick_language(code: String) -> void:
+	Settings.set_lang(code)
+	_rebuild_menus()
+	_begin_selection()
+
+
+## 언어 변경 후 메뉴들을 새 언어로 다시 만든다
+func _rebuild_menus() -> void:
+	for p in [select_panel, lb_panel, settings_panel, lang_panel]:
+		if is_instance_valid(p):
+			p.queue_free()
+	_build_select_panel()
+	_build_leaderboard_panel()
+	_build_settings_panel()
+	_build_language_panel()
+
+
+func _open_language() -> void:
+	if lang_search != null:
+		lang_search.text = ""
+	_refresh_language()
+	ui.move_child(lang_panel, ui.get_child_count() - 1)
+	lang_panel.visible = true
+
+
+func _close_language() -> void:
+	lang_panel.visible = false
 
 
 ## 텍스트 버튼 헬퍼 (게임 느낌의 둥근 스타일박스)
@@ -1050,17 +1294,20 @@ func _make_text_button(text: String, fsize: int, min_size: Vector2, cb: Callable
 	return b
 
 
-## 버튼에 둥근 배경/테두리 스타일 적용
+## 버튼에 둥근 배경/테두리/그림자 스타일 적용 (카툰풍)
 func _style_button(b: Button, bg: Color, border: Color) -> void:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = bg
-	sb.set_corner_radius_all(16)
-	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(18)
+	sb.set_border_width_all(3)
 	sb.border_color = border
 	sb.content_margin_left = 14
 	sb.content_margin_right = 14
 	sb.content_margin_top = 8
 	sb.content_margin_bottom = 8
+	sb.shadow_color = Color(0, 0, 0, 0.35)
+	sb.shadow_size = 6
+	sb.shadow_offset = Vector2(0, 4)
 	b.add_theme_stylebox_override("normal", sb)
 	var hov := sb.duplicate()
 	hov.bg_color = bg.lightened(0.12)
@@ -1085,7 +1332,7 @@ func _build_calib_panel() -> void:
 	box.add_child(_centered(calib_label))
 
 	calib_button = Button.new()
-	calib_button.text = "센서 켜기 ▶"
+	calib_button.text = Locale.t("sensor_on")
 	if ui_font:
 		calib_button.add_theme_font_override("font", ui_font)
 	calib_button.add_theme_font_size_override("font_size", 40)
@@ -1115,22 +1362,21 @@ func _show_game_over() -> void:
 		c.queue_free()
 
 	var tid: String = current_type.get("id", "brick")
-	var tname: String = current_type.get("name", "블록")
-	over_body.add_child(_centered(_make_label("붕괴", 72, Color(0.9, 0.35, 0.32))))
-	over_body.add_child(_centered(_make_label(
-		"당신도 수많은 욕망의\n잔해 중 하나가 되었습니다.", 34, Color(0.82, 0.8, 0.85))))
+	var tname: String = _type_name(current_type)
+	over_body.add_child(_centered(_make_label(Locale.t("go_title"), 72, Color(0.9, 0.35, 0.32))))
+	over_body.add_child(_centered(_make_label(Locale.t("go_line1"), 32, Color(0.82, 0.8, 0.85))))
 	over_body.add_child(_spacer(10))
 	over_body.add_child(_centered(_make_label(
-		"[%s] 이번 높이  %d m" % [tname, _peak_meters()], 40, Color(0.95, 0.93, 0.8))))
+		Locale.t("go_this") % [tname, _peak_meters()], 40, Color(0.95, 0.93, 0.8))))
 	over_body.add_child(_centered(_make_label(
-		"이 블록 최고 기록  %d m" % Graveyard.best_for(tid), 28, Color(0.6, 0.62, 0.7))))
+		Locale.t("go_best") % Graveyard.best_for(tid), 28, Color(0.6, 0.62, 0.7))))
 
-	# 역대 욕망의 잔해 무덤 (이 블록 타입)
+	# 역대 잔해 무덤 (이 블록 타입)
 	var recent: Array = Graveyard.recent(tid, 6)
 	if recent.size() > 0:
 		over_body.add_child(_spacer(12))
 		over_body.add_child(_centered(_make_label(
-			"— 역대 %s 잔해 —" % tname, 24, Color(0.5, 0.5, 0.58))))
+			Locale.t("go_graveyard") % tname, 24, Color(0.5, 0.5, 0.58))))
 		var line := ""
 		for h in recent:
 			line += "%d   " % int(h)
@@ -1138,11 +1384,43 @@ func _show_game_over() -> void:
 			line.strip_edges(), 26, Color(0.55, 0.5, 0.45))))
 
 	over_body.add_child(_spacer(20))
-	over_body.add_child(_centered(_make_text_button("다시 쌓기", 38, Vector2(280, 90), _restart)))
-	over_body.add_child(_centered(_make_text_button("랭킹 보기", 30, Vector2(280, 72), _open_leaderboard)))
-	over_body.add_child(_centered(_make_text_button("블록 바꾸기", 30, Vector2(280, 72), _restart_to_select)))
+	# 최고기록 갱신 시: 그 순간 스크린샷 공유 버튼
+	if record_broken and record_img != null:
+		over_body.add_child(_centered(_make_text_button(Locale.t("share"), 32, Vector2(280, 78), _share_record)))
+	over_body.add_child(_centered(_make_text_button(Locale.t("retry"), 38, Vector2(280, 90), _restart)))
+	over_body.add_child(_centered(_make_text_button(Locale.t("view_leaderboard"), 30, Vector2(280, 72), _open_leaderboard)))
+	over_body.add_child(_centered(_make_text_button(Locale.t("change_block"), 30, Vector2(280, 72), _restart_to_select)))
 
 	over_panel.visible = true
+
+
+## 최고기록 순간 스크린샷을 저장/공유. 웹은 navigator.share(없으면 다운로드), 그 외엔 파일 저장.
+func _share_record() -> void:
+	if record_img == null:
+		return
+	var png: PackedByteArray = record_img.save_png_to_buffer()
+	if OS.has_feature("web"):
+		var b64 := Marshalls.raw_to_base64(png)
+		var js := """
+		(function(){
+		  try{
+		    var bin=atob('%s'); var len=bin.length; var arr=new Uint8Array(len);
+		    for(var i=0;i<len;i++){arr[i]=bin.charCodeAt(i);}
+		    var blob=new Blob([arr],{type:'image/png'});
+		    var file=new File([blob],'genesis11.png',{type:'image/png'});
+		    if(navigator.canShare && navigator.canShare({files:[file]})){
+		      navigator.share({files:[file], title:'Genesis 11', text:'%s'});
+		    } else {
+		      var url=URL.createObjectURL(blob); var a=document.createElement('a');
+		      a.href=url; a.download='genesis11.png'; document.body.appendChild(a); a.click();
+		      setTimeout(function(){URL.revokeObjectURL(url); a.remove();},1000);
+		    }
+		  }catch(e){console.error(e);}
+		})();
+		""" % [b64, Locale.t("record_break")]
+		JavaScriptBridge.eval(js, true)
+	else:
+		record_img.save_png("user://genesis11_record.png")
 
 
 ## 붕괴 화면에서 '블록 바꾸기' → 판을 리셋하고 선택 화면으로
