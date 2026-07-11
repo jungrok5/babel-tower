@@ -89,12 +89,18 @@ func _ready() -> void:
 	Motion._sway = 0.0
 	await _build(4)
 	await _settle(30)
-	main._toggle_inspect()             # inspect ON (지면에서 시작 + 안내 문구)
+	main._toggle_inspect()             # inspect ON (지면=구름 없음 + 안내 문구)
 	await _settle(55)
-	await _shot("04_inspect")          # 관찰 시작: 지면+탑 + 안내(미리보기 고도)
-	main.inspect_pan.y = -9900.0       # 위로 스크롤 → 우주 고도(카메라가 위로 이동)
+	await _shot("04_inspect")          # 지면: 맑음(구름 없음) + 해
+	main.inspect_pan.y = -2862.0       # ~250m: 구름 가득 밴드
+	await _settle(70)
+	await _shot("04c_clouds")          # 구름 층 통과
+	main.inspect_pan.y = -5340.0       # ~450m: 성층권(권운) 진입
+	await _settle(70)
+	await _shot("04d_strato")          # 성층권 얇은 권운
+	main.inspect_pan.y = -9900.0       # ~817m: 우주(별)
 	await _settle(80)
-	await _shot("04b_inspect_space")   # 우주까지 스크롤(어두운 하늘 + 별)
+	await _shot("04b_inspect_space")   # 우주(어두운 하늘 + 별)
 	main._toggle_inspect()             # inspect OFF
 	await _settle(30)
 
