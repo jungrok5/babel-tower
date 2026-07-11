@@ -4,10 +4,10 @@ extends Node2D
 ## 핵심 규칙: 기기를 최대한 움직이지 마라.
 ## 흔들리면 탑이 요동치고, 높이 올라갈수록 작은 떨림도 치명적이 된다.
 
-enum State { CALIB, READY, OVER, SELECT }
+enum State { CALIB, READY, OVER, SELECT, TUTORIAL }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v3.2 · gen11"
+const GAME_VERSION := "v3.3 · tutorial"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -67,6 +67,8 @@ var guides_group: Control
 var guide_btn: Button
 var gyro_btn: Button
 var select_panel: Control
+var tutorial: Control                # 손 모양 조작 튜토리얼 오버레이
+var tut_from_select := false         # 선택화면 '조작법'으로 열었는가(끝나면 선택화면 복귀)
 var lb_panel: Control                # 랭킹(리더보드) 오버레이
 var lb_rows: VBoxContainer           # 랭킹 행 목록
 var lb_title: Label
@@ -208,11 +210,48 @@ func _begin_selection() -> void:
 	over_panel.visible = false
 
 
-## 블록 타입 선택 → 보정으로 진행
+## 블록 타입 선택 → (첫 플레이면 튜토리얼) → 보정으로 진행
 func _choose_type(id: String) -> void:
 	current_type = BlockTypes.get_type(id)
 	select_panel.visible = false
-	_begin_calibration()
+	if not Graveyard.tutorial_seen:
+		tut_from_select = false
+		_begin_tutorial()
+	else:
+		_begin_calibration()
+
+
+## 선택 화면에서 '조작법 다시 보기'
+func _replay_tutorial() -> void:
+	tut_from_select = true
+	_begin_tutorial()
+
+
+## 손 모양 조작 튜토리얼을 띄운다
+func _begin_tutorial() -> void:
+	state = State.TUTORIAL
+	select_panel.visible = false
+	calib_panel.visible = false
+	over_panel.visible = false
+	if tutorial == null:
+		tutorial = load("res://scripts/tutorial.gd").new()
+		tutorial.setup(ui_font)
+		tutorial.finished.connect(_on_tutorial_done)
+		ui.add_child(tutorial)
+	ui.move_child(tutorial, ui.get_child_count() - 1)
+	tutorial.visible = true
+
+
+func _on_tutorial_done() -> void:
+	if tutorial != null:
+		tutorial.visible = false
+	Graveyard.set_tutorial_seen()
+	# '조작법 다시 보기'로 열었으면 선택 화면으로, 첫 플레이면 보정으로
+	if tut_from_select:
+		tut_from_select = false
+		_begin_selection()
+	else:
+		_begin_calibration()
 
 
 func _begin_calibration() -> void:
@@ -685,7 +724,7 @@ func _update_camera(delta: float) -> void:
 		var needed := (GROUND_TOP_Y - tower_top_y) + 700.0   # 여백 포함 높이
 		z = clampf(1280.0 / needed, 0.16, 1.0)
 		target = Vector2(BASE_X, mid_y)
-	elif state == State.CALIB or state == State.SELECT:
+	elif state == State.CALIB or state == State.SELECT or state == State.TUTORIAL:
 		target = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
 		z = 1.0
 	else:
@@ -728,6 +767,8 @@ func _update_ui(delta: float) -> void:
 		State.OVER:
 			hint_label.text = ""
 		State.SELECT:
+			hint_label.text = ""
+		State.TUTORIAL:
 			hint_label.text = ""
 
 
@@ -824,8 +865,12 @@ func _build_select_panel() -> void:
 	box.add_theme_constant_override("separation", 26)
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	center.add_child(box)
-	box.add_child(_centered(_make_label("GENESIS 11", 32, Color(0.62, 0.66, 0.8))))
-	box.add_child(_centered(_make_label("무엇을 쌓을까요?", 50, Color(0.95, 0.92, 0.82))))
+	var emblem: Control = load("res://scripts/emblem.gd").new()
+	emblem.custom_minimum_size = Vector2(210, 150)
+	emblem.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(_centered(emblem))
+	box.add_child(_centered(_make_label("GENESIS 11", 40, Color(0.86, 0.78, 0.55))))
+	box.add_child(_centered(_make_label("창세기 11장 · 무엇을 쌓을까요?", 30, Color(0.7, 0.72, 0.8))))
 	box.add_child(_centered(_make_label(
 		"블록마다 난이도와 최고 기록이 따로 관리됩니다", 26, Color(0.6, 0.63, 0.72))))
 	var grid := GridContainer.new()
@@ -836,7 +881,12 @@ func _build_select_panel() -> void:
 	for t in BlockTypes.all():
 		grid.add_child(_make_type_tile(t))
 	box.add_child(_spacer(4))
-	box.add_child(_centered(_make_text_button("랭킹 보기", 30, Vector2(240, 66), _open_leaderboard)))
+	var actions := HBoxContainer.new()
+	actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	actions.add_theme_constant_override("separation", 16)
+	actions.add_child(_make_text_button("랭킹 보기", 28, Vector2(210, 64), _open_leaderboard))
+	actions.add_child(_make_text_button("조작법", 28, Vector2(160, 64), _replay_tutorial))
+	box.add_child(_centered(actions))
 	ui.add_child(select_panel)
 
 
@@ -845,6 +895,7 @@ func _make_type_tile(t: Dictionary) -> Button:
 	var b := Button.new()
 	b.custom_minimum_size = Vector2(212, 172)
 	b.focus_mode = Control.FOCUS_NONE
+	_style_button(b, Color(0.11, 0.13, 0.18), Color(0.32, 0.37, 0.48))
 	b.pressed.connect(_choose_type.bind(t["id"]))
 	var icon: Control = load("res://scripts/type_icon.gd").new()
 	icon.type_def = t
@@ -985,7 +1036,7 @@ func _lb_entry_row(e: Dictionary) -> Control:
 	return row
 
 
-## 텍스트 버튼 헬퍼
+## 텍스트 버튼 헬퍼 (게임 느낌의 둥근 스타일박스)
 func _make_text_button(text: String, fsize: int, min_size: Vector2, cb: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
@@ -994,8 +1045,29 @@ func _make_text_button(text: String, fsize: int, min_size: Vector2, cb: Callable
 	b.add_theme_font_size_override("font_size", fsize)
 	b.custom_minimum_size = min_size
 	b.focus_mode = Control.FOCUS_NONE
+	_style_button(b, Color(0.15, 0.17, 0.23), Color(0.40, 0.45, 0.56))
 	b.pressed.connect(cb)
 	return b
+
+
+## 버튼에 둥근 배경/테두리 스타일 적용
+func _style_button(b: Button, bg: Color, border: Color) -> void:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.set_corner_radius_all(16)
+	sb.set_border_width_all(2)
+	sb.border_color = border
+	sb.content_margin_left = 14
+	sb.content_margin_right = 14
+	sb.content_margin_top = 8
+	sb.content_margin_bottom = 8
+	b.add_theme_stylebox_override("normal", sb)
+	var hov := sb.duplicate()
+	hov.bg_color = bg.lightened(0.12)
+	hov.border_color = border.lightened(0.2)
+	b.add_theme_stylebox_override("hover", hov)
+	b.add_theme_stylebox_override("pressed", hov)
+	b.add_theme_color_override("font_color", Color(0.94, 0.92, 0.86))
 
 
 func _build_calib_panel() -> void:

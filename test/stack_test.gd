@@ -16,6 +16,7 @@ func _ready() -> void:
 	add_child(main)
 	print("[TEST] main added, state=%d" % int(main.state))
 	await get_tree().physics_frame
+	Graveyard.tutorial_seen = true         # 튜토리얼 건너뛰기
 	main._choose_type("brick")            # 선택 화면 건너뛰고 벽돌로 시작
 	print("[TEST] chose brick, state=%d" % int(main.state))
 	var t := 0

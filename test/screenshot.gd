@@ -29,7 +29,18 @@ func _ready() -> void:
 	main._close_leaderboard()
 	Graveyard.by_type.erase("brick")   # 테스트 아티팩트 제거
 
-	main._choose_type("brick")         # 벽돌로 시작
+	# 손 모양 튜토리얼 — 각 단계 캡처
+	Graveyard.tutorial_seen = false
+	main._choose_type("brick")         # 첫 플레이 → 튜토리얼
+	await _settle(8)
+	if main.tutorial != null:
+		main.tutorial.t = 1.4          # ① 드래그
+		await _settle(3); await _shot("00c_tut_drag")
+		main.tutorial.t = 3.4          # ② 회전(탭)
+		await _settle(3); await _shot("00d_tut_rotate")
+		main.tutorial.t = 6.6          # ③ 수평 유지
+		await _settle(3); await _shot("00e_tut_still")
+		main.tutorial.finished.emit()  # 튜토리얼 종료 → 보정
 
 	# READY(보정 완료)까지 대기
 	var t := 0

@@ -1,0 +1,188 @@
+extends Control
+## 손 모양이 실제로 제스처를 시연하는 인게임 튜토리얼(텍스트 카드가 아니라 손이 직접 움직인다).
+## 3단계 루프: ① 끌어서 위치  ② 두 손가락 탭 = 회전  ③ 기기를 수평으로.
+## "시작하기"를 누르면 finished를 emit한다.
+
+signal finished
+
+const VW := 720.0
+const VH := 1280.0
+const CYCLE := 9.0        # 한 바퀴(초)
+const P1 := 3.0           # 드래그 구간 끝
+const P2 := 6.2           # 회전 구간 끝
+
+var t: float = 0.0
+var font: Font
+var _skin := Color(0.98, 0.82, 0.66)
+var _skin_edge := Color(0.80, 0.60, 0.44)
+
+
+func setup(f: Font) -> void:
+	font = f
+
+
+func _ready() -> void:
+	set_anchors_preset(Control.PRESET_FULL_RECT)
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	var start := Button.new()
+	start.text = "시작하기"
+	if font:
+		start.add_theme_font_override("font", font)
+	start.add_theme_font_size_override("font_size", 38)
+	start.custom_minimum_size = Vector2(300, 88)
+	start.position = Vector2(210, 1150)
+	start.focus_mode = Control.FOCUS_NONE
+	start.pressed.connect(func(): finished.emit())
+	add_child(start)
+
+
+func _process(dt: float) -> void:
+	t += dt
+	queue_redraw()
+
+
+func _draw() -> void:
+	draw_rect(Rect2(0, 0, VW, VH), Color(0.03, 0.04, 0.07, 0.86))
+	if font:
+		draw_string(font, Vector2(0, 150), "조작 방법", HORIZONTAL_ALIGNMENT_CENTER, VW, 56,
+			Color(0.96, 0.93, 0.83))
+
+	var ped := Vector2(360, 760)
+	_draw_pedestal(ped)
+	var bs := Vector2(184, 64)
+	var cyc := fmod(t, CYCLE)
+	var cap := ""
+
+	if cyc < P1:
+		# ① 끌어서 좌우 위치
+		cap = "① 손가락으로 끌어 좌우 위치를 정하고, 떼면 놓입니다"
+		var ph := cyc / P1
+		var x := 360.0 + sin(ph * TAU) * 130.0
+		var bc := Vector2(x, ped.y - bs.y * 0.5 - 150.0)
+		# 낙하 컬럼 힌트
+		draw_dashed_line(Vector2(x, bc.y + bs.y * 0.5), Vector2(x, ped.y - bs.y),
+			Color(0.98, 0.92, 0.55, 0.4), 2.0, 12.0)
+		_draw_block(bc, 0.0, bs, Color(0.82, 0.75, 0.58, 0.95))
+		_draw_hand(bc + Vector2(6.0, 6.0), false, 0.0)
+		# 좌우 화살표
+		_draw_move_arrows(bc, bs)
+	elif cyc < P2:
+		# ② 두 손가락 탭 = 회전
+		cap = "② 두 손가락으로 탭하면 블록이 90° 회전합니다"
+		var lp := cyc - P1                     # 0..3.2
+		var period := 1.05
+		var taps := int(lp / period)
+		var frac := fmod(lp, period) / period
+		# 탭 순간 살짝 튕기며 회전 보간
+		var rot := deg_to_rad(90.0 * taps)
+		if frac < 0.28:
+			rot -= deg_to_rad(90.0) * (1.0 - frac / 0.28)   # 직전 회전 이징
+		var bc := Vector2(360.0, ped.y - bs.y * 0.5 - 60.0)
+		_draw_block(bc, rot, bs, Color(0.82, 0.75, 0.58, 0.98))
+		var press := 1.0 if frac < 0.2 else 0.0
+		_draw_hand(bc + Vector2(-8.0, 10.0), true, press)
+		if frac < 0.45:
+			var rp := frac / 0.45
+			_draw_ripple(bc + Vector2(-34.0, 22.0), rp)
+			_draw_ripple(bc + Vector2(40.0, 28.0), rp)
+	else:
+		# ③ 기기를 수평으로 (흔들리면 무너짐)
+		cap = "③ 기기를 수평으로 유지! 흔들리면 탑이 무너집니다"
+		var lp := cyc - P2
+		var wob := sin(lp * 7.0) * 0.05 * clampf((lp - 0.3) * 1.5, 0.0, 1.0)
+		_draw_mini_tower(ped, bs, wob)
+		# 기울기 경고 아이콘(수평계 느낌)
+		_draw_level_hint(Vector2(360.0, 430.0), wob)
+
+	if font:
+		draw_string(font, Vector2(24, 1064), cap, HORIZONTAL_ALIGNMENT_CENTER, VW - 48, 32,
+			Color(0.86, 0.89, 0.96))
+		draw_string(font, Vector2(24, 1108), "(제단 위로 최대한 높이 쌓으세요)", HORIZONTAL_ALIGNMENT_CENTER,
+			VW - 48, 24, Color(0.55, 0.58, 0.66))
+
+
+# ---------- 그리기 헬퍼 ----------
+
+func _draw_pedestal(c: Vector2) -> void:
+	var foot := Color(0.30, 0.29, 0.34)
+	var body := Color(0.40, 0.39, 0.45)
+	var cap := Color(0.50, 0.49, 0.55)
+	_rect(Vector2(c.x, c.y + 6.0), Vector2(232, 24), foot)
+	_rect(Vector2(c.x, c.y - 17.0), Vector2(188, 50), body)
+	_rect(Vector2(c.x, c.y - 43.0), Vector2(206, 16), cap)
+	_rect(Vector2(c.x, c.y - 49.0), Vector2(206, 4), cap.lightened(0.18))
+
+
+func _draw_block(center: Vector2, rot: float, size: Vector2, col: Color) -> void:
+	draw_set_transform(center, rot, Vector2.ONE)
+	var r := Rect2(-size * 0.5, size)
+	draw_rect(r, col)
+	draw_rect(r, col.darkened(0.4), false, 3.0)
+	draw_line(Vector2(-size.x * 0.5 + 6, -size.y * 0.5 + 5),
+		Vector2(size.x * 0.5 - 6, -size.y * 0.5 + 5), col.lightened(0.22), 2.0)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_mini_tower(ped: Vector2, bs: Vector2, wob: float) -> void:
+	var n := 4
+	for i in range(n):
+		var yy := ped.y - bs.y - i * bs.y
+		var shift := wob * (i + 1) * 26.0
+		_draw_block(Vector2(ped.x + shift, yy + bs.y * 0.5), wob * (i + 1) * 0.35,
+			bs, Color(0.82, 0.75, 0.58, 0.98))
+
+
+## 손: 검지(+회전 시 중지)로 화면을 누르는 모습. tip = 닿는 지점.
+func _draw_hand(tip: Vector2, two: bool, press: float) -> void:
+	var palm := tip + Vector2(30.0, 118.0 - press * 8.0)
+	# 손목
+	_rect(palm + Vector2(6, 60), Vector2(70, 90), _skin)
+	# 손등
+	draw_circle(palm, 52.0, _skin)
+	# 엄지
+	_finger(palm + Vector2(-40, 2), palm + Vector2(-2, 42), 15.0)
+	# 검지 → tip
+	_finger(palm + Vector2(-20, -20), tip, 17.0)
+	if two:
+		_finger(palm + Vector2(10, -22), tip + Vector2(46.0, 8.0), 16.0)
+	# 손끝 하이라이트 링
+	draw_arc(tip, 12.0, 0, TAU, 20, Color(1, 1, 1, 0.5), 2.0)
+	if two:
+		draw_arc(tip + Vector2(46.0, 8.0), 12.0, 0, TAU, 20, Color(1, 1, 1, 0.5), 2.0)
+
+
+func _finger(a: Vector2, b: Vector2, r: float) -> void:
+	draw_line(a, b, _skin_edge, 2.0 * r + 4.0)
+	draw_line(a, b, _skin, 2.0 * r)
+	draw_circle(b, r, _skin)
+
+
+func _draw_ripple(center: Vector2, ph: float) -> void:
+	var rr := lerpf(6.0, 44.0, ph)
+	draw_arc(center, rr, 0, TAU, 28, Color(1, 1, 1, (1.0 - ph) * 0.55), 3.0)
+
+
+func _draw_move_arrows(bc: Vector2, bs: Vector2) -> void:
+	var col := Color(0.98, 0.92, 0.55, 0.8)
+	var lx := bc.x - bs.x * 0.5 - 34.0
+	var rx := bc.x + bs.x * 0.5 + 34.0
+	_arrow(Vector2(lx, bc.y), -1.0, col)
+	_arrow(Vector2(rx, bc.y), 1.0, col)
+
+
+func _arrow(tip: Vector2, dir: float, col: Color) -> void:
+	draw_line(tip, tip + Vector2(dir * 22.0, -14.0), col, 4.0)
+	draw_line(tip, tip + Vector2(dir * 22.0, 14.0), col, 4.0)
+
+
+func _draw_level_hint(c: Vector2, wob: float) -> void:
+	# 수평계 느낌: 기울어진 막대 + 가운데 방울
+	var ang := wob * 4.0
+	draw_set_transform(c, ang, Vector2.ONE)
+	_rect(Vector2.ZERO, Vector2(180, 14), Color(0.22, 0.24, 0.3))
+	draw_circle(Vector2(0, 0), 9.0, Color(0.5, 0.85, 0.5) if absf(wob) < 0.02 else Color(0.92, 0.5, 0.4))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _rect(center: Vector2, size: Vector2, col: Color) -> void:
+	draw_rect(Rect2(center - size * 0.5, size), col)

@@ -8,10 +8,16 @@ const MAX_RECORDS := 50
 
 # id -> { "best": int(m), "records": Array[int] }  (records: 최근 것이 뒤)
 var by_type: Dictionary = {}
+var tutorial_seen: bool = false      # 조작 튜토리얼을 봤는가
 
 
 func _ready() -> void:
 	_load()
+
+
+func set_tutorial_seen() -> void:
+	tutorial_seen = true
+	_save()
 
 
 func _bucket(type_id: String) -> Dictionary:
@@ -53,13 +59,14 @@ func _load() -> void:
 		return
 	var data: Variant = JSON.parse_string(f.get_as_text())
 	f.close()
-	if typeof(data) == TYPE_DICTIONARY and data.has("by_type"):
-		by_type = data["by_type"]
+	if typeof(data) == TYPE_DICTIONARY:
+		by_type = data.get("by_type", {})
+		tutorial_seen = bool(data.get("tutorial_seen", false))
 
 
 func _save() -> void:
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f == null:
 		return
-	f.store_string(JSON.stringify({"by_type": by_type}))
+	f.store_string(JSON.stringify({"by_type": by_type, "tutorial_seen": tutorial_seen}))
 	f.close()
