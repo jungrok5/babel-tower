@@ -55,41 +55,41 @@ func _draw() -> void:
 
 	if cyc < P1:
 		# ① 끌어서 좌우 위치
-		cap = "① 손가락으로 끌어 좌우 위치를 정하고, 떼면 놓입니다"
-		var ph := cyc / P1
-		var x := 360.0 + sin(ph * TAU) * 130.0
-		var bc := Vector2(x, ped.y - bs.y * 0.5 - 150.0)
+		cap = "① 끌어서 좌우 위치를 정하고 떼면 놓기"
+		var ph_d := cyc / P1
+		var x_d := 360.0 + sin(ph_d * TAU) * 130.0
+		var bc_d := Vector2(x_d, ped.y - bs.y * 0.5 - 150.0)
 		# 낙하 컬럼 힌트
-		draw_dashed_line(Vector2(x, bc.y + bs.y * 0.5), Vector2(x, ped.y - bs.y),
+		draw_dashed_line(Vector2(x_d, bc_d.y + bs.y * 0.5), Vector2(x_d, ped.y - bs.y),
 			Color(0.98, 0.92, 0.55, 0.4), 2.0, 12.0)
-		_draw_block(bc, 0.0, bs, Color(0.82, 0.75, 0.58, 0.95))
-		_draw_hand(bc + Vector2(6.0, 6.0), false, 0.0)
+		_draw_block(bc_d, 0.0, bs, Color(0.82, 0.75, 0.58, 0.95))
+		_draw_hand(bc_d + Vector2(6.0, 6.0), false, 0.0)
 		# 좌우 화살표
-		_draw_move_arrows(bc, bs)
+		_draw_move_arrows(bc_d, bs)
 	elif cyc < P2:
 		# ② 두 손가락 탭 = 회전
 		cap = "② 두 손가락으로 탭하면 블록이 90° 회전합니다"
-		var lp := cyc - P1                     # 0..3.2
+		var lp_r := cyc - P1                    # 0..3.2
 		var period := 1.05
-		var taps := int(lp / period)
-		var frac := fmod(lp, period) / period
+		var taps := int(lp_r / period)
+		var frac := fmod(lp_r, period) / period
 		# 탭 순간 살짝 튕기며 회전 보간
 		var rot := deg_to_rad(90.0 * taps)
 		if frac < 0.28:
 			rot -= deg_to_rad(90.0) * (1.0 - frac / 0.28)   # 직전 회전 이징
-		var bc := Vector2(360.0, ped.y - bs.y * 0.5 - 60.0)
-		_draw_block(bc, rot, bs, Color(0.82, 0.75, 0.58, 0.98))
+		var bc_r := Vector2(360.0, ped.y - bs.y * 0.5 - 60.0)
+		_draw_block(bc_r, rot, bs, Color(0.82, 0.75, 0.58, 0.98))
 		var press := 1.0 if frac < 0.2 else 0.0
-		_draw_hand(bc + Vector2(-8.0, 10.0), true, press)
+		_draw_hand(bc_r + Vector2(-8.0, 10.0), true, press)
 		if frac < 0.45:
 			var rp := frac / 0.45
-			_draw_ripple(bc + Vector2(-34.0, 22.0), rp)
-			_draw_ripple(bc + Vector2(40.0, 28.0), rp)
+			_draw_ripple(bc_r + Vector2(-34.0, 22.0), rp)
+			_draw_ripple(bc_r + Vector2(40.0, 28.0), rp)
 	else:
 		# ③ 기기를 수평으로 (흔들리면 무너짐)
-		cap = "③ 기기를 수평으로 유지! 흔들리면 탑이 무너집니다"
-		var lp := cyc - P2
-		var wob := sin(lp * 7.0) * 0.05 * clampf((lp - 0.3) * 1.5, 0.0, 1.0)
+		cap = "③ 기기를 수평으로! 흔들리면 무너집니다"
+		var lp_s := cyc - P2
+		var wob := sin(lp_s * 7.0) * 0.05 * clampf((lp_s - 0.3) * 1.5, 0.0, 1.0)
 		_draw_mini_tower(ped, bs, wob)
 		# 기울기 경고 아이콘(수평계 느낌)
 		_draw_level_hint(Vector2(360.0, 430.0), wob)
@@ -166,8 +166,8 @@ func _draw_move_arrows(bc: Vector2, bs: Vector2) -> void:
 	var col := Color(0.98, 0.92, 0.55, 0.8)
 	var lx := bc.x - bs.x * 0.5 - 34.0
 	var rx := bc.x + bs.x * 0.5 + 34.0
-	_arrow(Vector2(lx, bc.y), -1.0, col)
-	_arrow(Vector2(rx, bc.y), 1.0, col)
+	_arrow(Vector2(lx, bc.y), 1.0, col)     # 왼쪽 화살표는 바깥(왼쪽)을 가리킴
+	_arrow(Vector2(rx, bc.y), -1.0, col)
 
 
 func _arrow(tip: Vector2, dir: float, col: Color) -> void:
