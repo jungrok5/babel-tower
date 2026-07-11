@@ -160,10 +160,12 @@ func _build_world() -> void:
 	gcs.shape = gshape
 	gcs.position = Vector2(0, 100.0)
 	floor_body.add_child(gcs)
-	floor_body.add_child(_make_rect_poly(Vector2(0, 100.0), Vector2(4200.0, 200.0),
-		Color(0.34, 0.24, 0.14)))                                  # 흙
-	floor_body.add_child(_make_rect_poly(Vector2(0, 8.0), Vector2(4200.0, 18.0),
-		Color(0.30, 0.45, 0.18)))                                  # 잔디(윗면)
+	floor_body.add_child(_make_rect_poly(Vector2(0, 1000.0), Vector2(4200.0, 2000.0),
+		Color(0.34, 0.24, 0.14)))                                  # 흙(줌아웃에도 하늘 안 비치게 깊게)
+	floor_body.add_child(_make_rect_poly(Vector2(0, 22.0), Vector2(4200.0, 26.0),
+		Color(0.26, 0.40, 0.16)))                                  # 잔디 아래 진한 경계
+	floor_body.add_child(_make_rect_poly(Vector2(0, 6.0), Vector2(4200.0, 14.0),
+		Color(0.36, 0.56, 0.22)))                                  # 잔디(윗면, 밝게)
 
 	# 초석(제단/기단) — 피벗 바로 위, 바닥과 함께 기운다. 블록이 아니라 '쌓는 받침대'로 보이게
 	# 돌 제단처럼 그린다(창세기/바벨 테마). 충돌은 안정적인 사각형 유지.
@@ -931,7 +933,7 @@ func _build_ui() -> void:
 
 ## 블록 선택 화면 — 실생활 물품 타일 중 하나를 골라 시작
 func _build_select_panel() -> void:
-	select_panel = _make_overlay(Color(0.04, 0.05, 0.08, 0.97))
+	select_panel = _make_overlay(Color(0.06, 0.07, 0.11, 1.0))
 	select_panel.mouse_filter = Control.MOUSE_FILTER_STOP    # 뒤 입력 차단
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -1000,7 +1002,7 @@ func _type_name(t: Dictionary) -> String:
 
 ## 인게임 랭킹 화면. 지금은 목업 데이터, 나중에 Google Play Games에서 받아 채운다.
 func _build_leaderboard_panel() -> void:
-	lb_panel = _make_overlay(Color(0.03, 0.04, 0.07, 0.98))
+	lb_panel = _make_overlay(Color(0.06, 0.07, 0.11, 1.0))
 	lb_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	lb_panel.visible = false
 	var center := CenterContainer.new()
@@ -1130,7 +1132,7 @@ func _lb_entry_row(e: Dictionary) -> Control:
 # ---------------------------------------------------------------- 설정 / 언어
 
 func _build_settings_panel() -> void:
-	settings_panel = _make_overlay(Color(0.03, 0.04, 0.07, 0.98))
+	settings_panel = _make_overlay(Color(0.06, 0.07, 0.11, 1.0))
 	settings_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	settings_panel.visible = false
 	var center := CenterContainer.new()
@@ -1266,7 +1268,7 @@ func _pause_home() -> void:
 # ---- 언어 선택 (검색 포함, 100개국 대비) ----
 
 func _build_language_panel() -> void:
-	lang_panel = _make_overlay(Color(0.03, 0.04, 0.07, 0.99))
+	lang_panel = _make_overlay(Color(0.06, 0.07, 0.11, 1.0))
 	lang_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	lang_panel.visible = false
 	var center := CenterContainer.new()
