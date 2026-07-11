@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v2.8 · fall"
+const GAME_VERSION := "v2.9 · wind"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -46,6 +46,9 @@ var wind_timer := 4.0               # 다음 상태 전환까지
 var wind_gusting := false           # 지금 부는 중인가
 var bird: Node2D = null             # 현재 날아다니는 새(1마리)
 var bird_timer := 8.0               # 다음 새까지
+var settling: Block = null          # 착지 대기 중인 낙하 블록 — 닿기 전엔 다음 블록 못 놓음
+var settle_time := 0.0              # 낙하 후 경과(안전 타임아웃용)
+var wind_fx: Control                # 전경 바람 이펙트(방향/세기 시각화)
 var sfx := {}                       # 효과음 플레이어 모음
 var amb_wind: AudioStreamPlayer     # 바람 앰비언스(고도에 따라 커짐)
 
@@ -54,7 +57,6 @@ var ui: CanvasLayer
 var height_label: Label
 var best_label: Label
 var hint_label: Label
-var wind_label: Label
 var stab_fill: ColorRect
 var guides_group: Control
 var guide_btn: Button
@@ -82,6 +84,13 @@ func _build_environment() -> void:
 	add_child(bg)
 	sky = load("res://scripts/sky.gd").new()
 	bg.add_child(sky)
+
+	# 전경 바람 이펙트 — 월드(탑) 위, UI 아래에 그려진다
+	var fg := CanvasLayer.new()
+	fg.layer = 1
+	add_child(fg)
+	wind_fx = load("res://scripts/wind_fx.gd").new()
+	fg.add_child(wind_fx)
 
 
 func _build_audio() -> void:
@@ -205,7 +214,7 @@ func _on_sensor_enable() -> void:
 	_start_calibration_countdown()
 
 
-## 지정한 가로 위치(at_x) 위에서 벽돌을 떨어뜨린다. 안착을 기다리지 않아 연사 가능.
+## 지정한 가로 위치(at_x) 위에서 벽돌을 떨어뜨린다. 이 블록이 닿기 전엔 다음 블록을 못 놓는다.
 func _drop_block(at_x: float = BASE_X) -> void:
 	# 세로는 항상 탑 꼭대기 위에서 낙하 (가로는 손 뗀 위치)
 	var sy := _tower_top_edge() - BLOCK_SIZE.y * 0.5 - DROP_HEIGHT
@@ -214,8 +223,15 @@ func _drop_block(at_x: float = BASE_X) -> void:
 	b.landed.connect(_on_block_landed)
 	add_child(b)
 	blocks.append(b)
+	settling = b            # 이 블록이 바닥/탑에 닿기 전까지 다음 블록을 놓을 수 없다
+	settle_time = 0.0
 	score += 1
 	_check_progress()
+
+
+## 다음 블록을 놓을 수 있는가 (직전 블록이 닿았거나 없으면 가능)
+func _can_drop() -> bool:
+	return settling == null or not is_instance_valid(settling)
 
 
 func _meters() -> int:
@@ -224,6 +240,7 @@ func _meters() -> int:
 
 ## 블록이 바닥/탑에 닿는 순간 — 타격감(작은 카메라 킥 + 햅틱). 먼지는 블록이 직접 뿜는다.
 func _on_block_landed() -> void:
+	settling = null                     # 닿았다 → 다음 블록 허용
 	go_shake = maxf(go_shake, 5.0)
 	Input.vibrate_handheld(12)
 	_play("place", 0.14)
@@ -283,6 +300,7 @@ func _game_over() -> void:
 		return
 	state = State.OVER
 	aiming = false
+	settling = null
 	go_shake = 26.0
 	if is_instance_valid(bird):
 		bird.queue_free()
@@ -303,6 +321,7 @@ func _restart() -> void:
 	blocks.clear()
 	score = 0
 	aiming = false
+	settling = null
 	aim_x = BASE_X
 	last_milestone = 0
 	record_broken = false
@@ -331,13 +350,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	# 어디를 눌러도 벽돌은 '중앙'에서 시작. 누른 지점 기준으로 좌우로 끌면 그만큼 이동,
 	# 떼면 낙하. (터치는 emulate_mouse_from_touch로 마우스 이벤트가 된다)
 	if event is InputEventKey:
-		if event.pressed and not event.echo and event.keycode == KEY_SPACE and state == State.READY:
+		if event.pressed and not event.echo and event.keycode == KEY_SPACE \
+				and state == State.READY and _can_drop():
 			_drop_block(_clamp_aim(BASE_X))
 		return
 
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
-			if state == State.READY:
+			if state == State.READY and _can_drop():
 				aiming = true
 				drag_start_world = _screen_to_world_x(event.position)
 				aim_x = BASE_X                     # 무조건 중앙에서 시작
@@ -375,6 +395,15 @@ func _physics_process(delta: float) -> void:
 
 	_update_birds(delta)
 	_check_collapse()
+
+	# 안전장치: 어떤 이유로든 착지 신호가 안 오면 잠깐 뒤 잠금 해제(소프트락 방지)
+	if settling != null:
+		if not is_instance_valid(settling):
+			settling = null
+		else:
+			settle_time += delta
+			if settle_time > 3.0:
+				settling = null
 
 
 func _update_birds(delta: float) -> void:
@@ -468,6 +497,8 @@ func _process(delta: float) -> void:
 		sky.meters = float(_meters())
 		sky.t = world_time
 		sky.wind = wind_cur
+	if wind_fx != null:
+		wind_fx.wind = wind_cur
 	if amb_wind != null:
 		var tv := lerpf(-60.0, -13.0, clampf((float(_meters()) - 60.0) / 500.0, 0.0, 1.0))
 		amb_wind.volume_db = lerpf(amb_wind.volume_db, tv, 0.04)
@@ -548,17 +579,6 @@ func _update_ui(delta: float) -> void:
 		stab_fill.size.x = 300.0 * clampf(1.0 - inst, 0.02, 1.0)
 		stab_fill.color = Color(0.32, 0.85, 0.45).lerp(Color(0.92, 0.26, 0.26), inst)
 
-	# 바람 표시 (방향 화살표 + 세기)
-	if absf(wind_cur) > 0.1:
-		var arrow := "▶" if wind_cur > 0.0 else "◀"
-		var n := clampi(int(absf(wind_cur) * 3.0) + 1, 1, 3)
-		wind_label.text = "바람 " + arrow.repeat(n)
-		wind_label.add_theme_color_override("font_color",
-			Color(0.7, 0.85, 1.0).lerp(Color(1.0, 0.5, 0.4), absf(wind_cur)))
-		wind_label.visible = true
-	else:
-		wind_label.visible = false
-
 	match state:
 		State.CALIB:
 			hint_label.text = ""
@@ -583,6 +603,7 @@ func _build_ui() -> void:
 	ui_font = load("res://fonts/NanumGothic-Regular.ttf")
 
 	ui = CanvasLayer.new()
+	ui.layer = 5                     # 전경 바람 이펙트(layer 1)보다 위에 UI가 오도록
 	add_child(ui)
 
 	# 현재 높이 (미터) — 좌상단, 크게
@@ -627,14 +648,6 @@ func _build_ui() -> void:
 	guide_btn.focus_mode = Control.FOCUS_NONE
 	guide_btn.pressed.connect(_toggle_guides)
 	ui.add_child(guide_btn)
-
-	# 바람 표시 (상단 중앙, 바람 불 때만)
-	wind_label = _make_label("", 32, Color(0.72, 0.86, 1.0))
-	wind_label.position = Vector2(90, 168)
-	wind_label.size = Vector2(540, 42)
-	wind_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	wind_label.visible = false
-	ui.add_child(wind_label)
 
 	# 하단 힌트
 	hint_label = _make_label("", 30, Color(0.78, 0.8, 0.88))

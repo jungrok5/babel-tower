@@ -112,8 +112,16 @@ func _leave() -> void:
 
 
 func _draw() -> void:
-	var w := sin(flap) * 14.0
 	var c := body_col
+	if s == S.PERCH:
+		_draw_perched(c)
+	else:
+		_draw_flying(c)
+
+
+## 나는 모습 — 날개를 퍼덕인다
+func _draw_flying(c: Color) -> void:
+	var w := sin(flap) * 14.0
 	draw_line(Vector2(0, -3), Vector2(-26, -3 - w), c, 5.0)     # 날개
 	draw_line(Vector2(0, -3), Vector2(26, -3 - w), c, 5.0)
 	draw_circle(Vector2.ZERO, 13.0, c)                          # 몸통
@@ -121,3 +129,24 @@ func _draw() -> void:
 	draw_line(Vector2(_side * 17.0, -6.0), Vector2(_side * 27.0, -4.0),
 		Color(0.97, 0.72, 0.15), 3.5)                          # 부리
 	draw_circle(Vector2(_side * 12.0, -8.0), 2.2, Color(0.05, 0.05, 0.05))  # 눈
+
+
+## 앉은 모습 — 날개를 접고 두 다리로 블록 위에 앉는다(퍼덕이지 않음)
+func _draw_perched(c: Color) -> void:
+	var bob := sin(t * 2.2) * 0.7                               # 살짝 고갯짓(퍼덕임 아님)
+	var leg := Color(0.86, 0.55, 0.16)
+	# 다리 — 몸 아래에서 블록 윗면(로컬 y≈+7)까지
+	draw_line(Vector2(-4, 3), Vector2(-4, 8), leg, 2.6)
+	draw_line(Vector2(4, 3), Vector2(4, 8), leg, 2.6)
+	# 웅크린 몸통
+	draw_circle(Vector2(0, -3), 12.5, c)
+	# 접은 날개 — 등에 붙인 짧은 곡선(가까운 쪽 한 겹)
+	draw_line(Vector2(-_side * 3.0, -8.0), Vector2(-_side * 12.0, -1.0), c.darkened(0.12), 5.5)
+	# 꼬리 — 뒤로 살짝
+	draw_line(Vector2(-_side * 8.0, -4.0), Vector2(-_side * 20.0, -6.0), c, 4.0)
+	# 머리(약간 위로 세워 앉은 자세) + 고갯짓
+	var head := Vector2(_side * 8.0, -12.0 + bob)
+	draw_circle(head, 7.5, c)
+	draw_line(head + Vector2(_side * 6.0, 1.0), head + Vector2(_side * 15.0, 2.5),
+		Color(0.97, 0.72, 0.15), 3.2)                          # 부리
+	draw_circle(head + Vector2(_side * 2.5, -2.0), 2.1, Color(0.05, 0.05, 0.05))  # 눈
