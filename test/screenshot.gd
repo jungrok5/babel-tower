@@ -141,6 +141,19 @@ func _ready() -> void:
 	await _settle(80)
 	await _shot("10_ball")             # 공(원형, 잘 구름)
 
+	# 새 도형: 고깔(삼각 poly) / 병(세로형 poly+rect)
+	main._restart()
+	main.current_type = BlockTypes.get_type("cone")
+	await _build(4)
+	await _settle(70)
+	await _shot("11_cone")             # 고깔(뾰족한 삼각형)
+
+	main._restart()
+	main.current_type = BlockTypes.get_type("bottle")
+	await _build(3)
+	await _settle(70)
+	await _shot("12_bottle")           # 병(세로로 긴 형태)
+
 	get_tree().quit()
 
 

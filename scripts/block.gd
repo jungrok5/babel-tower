@@ -10,6 +10,8 @@ var type_def: Dictionary = {}
 var bbox: Vector2 = Vector2(180.0, 62.0)      ## 회전/높이 계산용 대략 경계 크기
 var tint: Color = Color(0.82, 0.76, 0.62)     ## 먼지 등에 쓰는 대표 색
 var _friction: float = 0.42
+var _bounce: float = 0.0
+var _mass: float = 2.0
 var _landed := false
 
 
@@ -17,6 +19,8 @@ func setup(t: Dictionary) -> void:
 	type_def = t
 	bbox = t.get("bbox", Vector2(180.0, 62.0))
 	_friction = t.get("friction", 0.42)
+	_bounce = t.get("bounce", 0.0)
+	_mass = t.get("mass", 2.0)
 	var parts: Array = t.get("parts", [])
 	if parts.size() > 0:
 		tint = parts[0]["color"]
@@ -30,26 +34,31 @@ func _ready() -> void:
 	# 타입의 각 파트를 충돌 형태로 추가(합성 콜라이더)
 	for p in type_def.get("parts", []):
 		var cs := CollisionShape2D.new()
-		if p["kind"] == "rect":
-			var rect: Rect2 = p["rect"]
-			var rshape := RectangleShape2D.new()
-			rshape.size = rect.size
-			cs.shape = rshape
-			cs.position = rect.position + rect.size * 0.5
-		else:
-			var cshape := CircleShape2D.new()
-			cshape.radius = p["r"]
-			cs.shape = cshape
-			cs.position = p["pos"]
+		match p["kind"]:
+			"rect":
+				var rect: Rect2 = p["rect"]
+				var rshape := RectangleShape2D.new()
+				rshape.size = rect.size
+				cs.shape = rshape
+				cs.position = rect.position + rect.size * 0.5
+			"circle":
+				var cshape := CircleShape2D.new()
+				cshape.radius = p["r"]
+				cs.shape = cshape
+				cs.position = p["pos"]
+			"poly":
+				var pshape := ConvexPolygonShape2D.new()
+				pshape.points = PackedVector2Array(p["pts"])   # 이미 블록 로컬 좌표
+				cs.shape = pshape
 		add_child(cs)
 
 	var mat := PhysicsMaterial.new()
 	# 마찰: 너무 높으면 바닥에 딱 붙어 통째로 기울기만 하고 안 넘어진다.
 	mat.friction = _friction
-	mat.bounce = 0.0
+	mat.bounce = _bounce
 	physics_material_override = mat
 
-	mass = 2.0
+	mass = _mass
 	# 댐핑으로 미세 진동을 가라앉혀 '묵직한' 느낌을 준다.
 	linear_damp = 0.7
 	angular_damp = 1.4

@@ -714,13 +714,21 @@ func _tilt_amount() -> float:
 
 
 func _check_collapse() -> void:
-	# 붕괴 판정 = '블록이 바닥(지면)에 닿음'. 기울어져 있어도 안 떨어졌으면 살아있다.
-	# 제대로 쌓인 블록은 토대 위(높은 위치)에 있고, 떨어진 블록만 지면 높이로 내려온다.
+	# 붕괴 판정 = '블록이 지면(흙 윗면)에 닿음'. 기울어져 있어도 안 떨어졌으면 살아있다.
+	# 중요: 바닥(토대)이 통째로 기울면 그 위 블록도 함께 기운다. 이때 '세계 기준 수평선'과
+	# 블록의 '절대 회전'으로 판정하면, 멀쩡히 토대에 얹힌 블록도 죽는 오판이 난다.
+	# → 기울어진 '바닥 로컬 좌표'에서, 바닥에 대한 '상대 회전'으로 최저점을 계산한다.
+	# 바닥 피벗(FLOOR_PIVOT)이 지면 윗면이므로 로컬 y=0이 지면. 얹힌 블록은 음수(위)로 유지된다.
+	if not is_instance_valid(floor_body):
+		return
+	var floor_rot := floor_body.global_rotation
 	for b in blocks:
 		if not is_instance_valid(b):
 			continue
-		var ext := 0.5 * (absf(b.bbox.x * sin(b.rotation)) + absf(b.bbox.y * cos(b.rotation)))
-		if b.position.y + ext > GROUND_TOP_Y - 6.0:
+		var lp := floor_body.to_local(b.global_position)          # 기울어진 바닥 기준 좌표
+		var rel := b.global_rotation - floor_rot                   # 바닥에 대한 상대 회전(얹힌 블록 ≈ 0)
+		var ext := 0.5 * (absf(b.bbox.x * sin(rel)) + absf(b.bbox.y * cos(rel)))
+		if lp.y + ext > -6.0:                                      # 최저점이 지면(로컬 y=0)에 닿음
 			_game_over()
 			return
 
@@ -800,12 +808,18 @@ func _draw() -> void:
 		var edge := Color(0.98, 0.92, 0.55, 0.75)
 		draw_set_transform(center, aim_rot, Vector2.ONE)
 		for p in current_type.get("parts", []):
-			if p["kind"] == "rect":
-				draw_rect(p["rect"], fill)
-				draw_rect(p["rect"], edge, false, 2.5)
-			else:
-				draw_circle(p["pos"], p["r"], fill)
-				draw_circle(p["pos"], p["r"], edge, false, 2.5)
+			match p["kind"]:
+				"rect":
+					draw_rect(p["rect"], fill)
+					draw_rect(p["rect"], edge, false, 2.5)
+				"circle":
+					draw_circle(p["pos"], p["r"], fill)
+					draw_circle(p["pos"], p["r"], edge, false, 2.5)
+				"poly":
+					draw_colored_polygon(p["pts"], fill)
+					var n: int = p["pts"].size()
+					for i in n:
+						draw_line(p["pts"][i], p["pts"][(i + 1) % n], edge, 2.5)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		draw_dashed_line(
 			Vector2(aim_x, center.y + half_h),
@@ -991,11 +1005,16 @@ func _make_type_tile(t: Dictionary) -> Button:
 	return b
 
 
-## 블록 타입의 현지화된 이름 (없으면 기본 name)
+## 블록 타입의 표시 이름.
+## 우선순위: i18n 키(번역이 있으면) → 원본 name → 빈 문자열(아이콘만).
+## 이름은 선택 사항이라, 번역 없는(예: 유저가 등록한) 블록은 아이콘만으로도 동작한다.
 func _type_name(t: Dictionary) -> String:
-	var key := "blk_" + str(t.get("id", ""))
-	var s := Locale.t(key)
-	return s if s != key else str(t.get("name", "?"))
+	var key: String = str(t.get("i18n", ""))
+	if key != "":
+		var s := Locale.t(key)
+		if s != key:
+			return s
+	return str(t.get("name", ""))
 
 
 # ---------------------------------------------------------------- 랭킹(리더보드)
