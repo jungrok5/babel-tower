@@ -827,8 +827,17 @@ func _update_ui(delta: float) -> void:
 # ---------------------------------------------------------------- UI 구성
 
 func _build_ui() -> void:
-	# 다국어(라틴+한글+일본어) 예쁜 폰트
-	ui_font = load("res://fonts/Pretendard-Regular.otf")
+	# 다국어 폰트: Pretendard(라틴/한글/키릴) + 시스템 폰트 폴백(CJK/데바나가리/태국/아랍 등).
+	# 100개국 대비 — 없는 글리프는 기기 시스템 폰트로 자동 대체. (완전 보장은 추후 Noto 번들)
+	var pre: FontFile = load("res://fonts/Pretendard-Regular.otf")
+	var sysfb := SystemFont.new()
+	sysfb.font_names = PackedStringArray([
+		"Noto Sans CJK KR", "Noto Sans CJK JP", "Noto Sans CJK SC", "Noto Sans JP",
+		"Noto Sans", "Noto Sans Devanagari", "Noto Sans Thai", "Noto Sans Arabic",
+		"Arial Unicode MS", "sans-serif"])
+	sysfb.allow_system_fallback = true
+	pre.fallbacks = [sysfb]
+	ui_font = pre
 
 	ui = CanvasLayer.new()
 	ui.layer = 5                     # 전경 바람 이펙트(layer 1)보다 위에 UI가 오도록
