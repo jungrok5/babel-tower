@@ -78,12 +78,19 @@ var ui_font: Font
 
 func _ready() -> void:
 	randomize()
+	print("[BOOT] start")
 	current_type = BlockTypes.get_type("brick")   # 선택 전 기본값
+	print("[BOOT] type ok")
 	_build_environment()
+	print("[BOOT] env ok")
 	_build_world()
+	print("[BOOT] world ok")
 	_build_ui()
+	print("[BOOT] ui ok")
 	_build_audio()
+	print("[BOOT] audio ok")
 	_begin_selection()
+	print("[BOOT] select ok")
 
 
 func _build_environment() -> void:

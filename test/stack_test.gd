@@ -8,10 +8,16 @@ var main: Node
 
 
 func _ready() -> void:
+	# 무슨 일이 있어도 로그가 남도록 강제 종료 실패방지 타이머
+	get_tree().create_timer(90.0).timeout.connect(func():
+		print("[TEST] FAILSAFE QUIT — 무언가 멈춤")
+		get_tree().quit())
 	main = load("res://scenes/Main.tscn").instantiate()
 	add_child(main)
+	print("[TEST] main added, state=%d" % int(main.state))
 	await get_tree().physics_frame
 	main._choose_type("brick")            # 선택 화면 건너뛰고 벽돌로 시작
+	print("[TEST] chose brick, state=%d" % int(main.state))
 	var t := 0
 	while int(main.state) != 1 and t < 800:
 		await get_tree().physics_frame

@@ -9,9 +9,13 @@ const OUT := "res://shots"
 
 
 func _ready() -> void:
+	get_tree().create_timer(150.0).timeout.connect(func():
+		print("[SHOT] FAILSAFE QUIT — 무언가 멈춤")
+		get_tree().quit())
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT))
 	main = load("res://scenes/Main.tscn").instantiate()
 	add_child(main)
+	print("[SHOT] main added, state=%d" % int(main.state))
 
 	# 블록 선택 화면 (모든 타입 아이콘)
 	await _settle(10)
