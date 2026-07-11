@@ -9,12 +9,12 @@ var wind: float = 0.0       # 현재 바람(-1..1, main이 갱신) — 스트릭
 const VW := 720.0
 const VH := 1280.0
 
-# (미터, 위색, 아래색) 키프레임 — 지상 노을 → 파란 하늘 → 남색 고공 → 우주
+# (미터, 위색, 아래색) 키프레임 — 맑은 대낮 → 파란 하늘 → 남색 고공 → 우주 (카툰풍)
 const SKY := [
-	[0.0,   Color(0.07, 0.10, 0.17), Color(0.12, 0.11, 0.17)],
-	[160.0, Color(0.17, 0.30, 0.52), Color(0.40, 0.54, 0.70)],
-	[420.0, Color(0.09, 0.10, 0.30), Color(0.20, 0.17, 0.42)],
-	[800.0, Color(0.010, 0.012, 0.03), Color(0.02, 0.02, 0.06)],
+	[0.0,   Color(0.40, 0.68, 0.95), Color(0.73, 0.89, 0.99)],
+	[230.0, Color(0.20, 0.42, 0.78), Color(0.44, 0.64, 0.92)],
+	[480.0, Color(0.10, 0.14, 0.38), Color(0.20, 0.20, 0.48)],
+	[820.0, Color(0.010, 0.012, 0.03), Color(0.02, 0.02, 0.06)],
 ]
 
 var _stars := []            # [Vector2 pos, float size, float phase]
@@ -59,6 +59,11 @@ func _draw() -> void:
 		var c := top.lerp(bot, f)
 		draw_rect(Rect2(0, VH * i / bands, VW, VH / bands + 1), c)
 
+	# 해 — 지상에서 밝게 떠 있다가 고공(성층권~우주)으로 갈수록 사라진다
+	var sun_a := clampf((300.0 - meters) / 160.0, 0.0, 1.0)
+	if sun_a > 0.0:
+		_draw_sun(Vector2(VW - 150.0, 210.0), sun_a)
+
 	# 별 — 고공에서 서서히 나타남 (>350m)
 	var star_a := clampf((meters - 350.0) / 400.0, 0.0, 1.0)
 	if star_a > 0.0:
@@ -66,13 +71,13 @@ func _draw() -> void:
 			var tw := 0.5 + 0.5 * sin(t * 2.0 + s[2])
 			draw_circle(s[0], s[1], Color(1, 1, 1, star_a * (0.4 + 0.6 * tw)))
 
-	# 구름 — 시작(지상)엔 없고, 일정 높이(60m~)부터 나타났다 성층권(340m~)에서 사라짐
-	var cloud_a := clampf((meters - 60.0) / 70.0, 0.0, 1.0) \
-		* clampf((340.0 - meters) / 90.0, 0.0, 1.0) * 0.55
+	# 구름 — 지상 근처(0~)부터 폭신하게 떠 있다가 성층권(340m~)에서 사라짐
+	var cloud_a := clampf((meters + 40.0) / 80.0, 0.0, 1.0) \
+		* clampf((340.0 - meters) / 90.0, 0.0, 1.0)
 	if cloud_a > 0.0:
 		for c in _clouds:
-			var x := fmod(c[0].x + t * c[2], VW + 300.0) - 150.0
-			_draw_cloud(Vector2(x, c[0].y), c[1], Color(0.9, 0.92, 0.96, cloud_a))
+			var x := fmod(c[0].x + t * c[2], VW + 400.0) - 200.0
+			_draw_cloud(Vector2(x, c[0].y), c[1], cloud_a)
 
 	# 바람 스트릭 — 바람이 부는 방향/세기를 시각화
 	var ws := absf(wind)
@@ -85,6 +90,25 @@ func _draw() -> void:
 				Color(0.85, 0.9, 1.0, a), 2.0)
 
 
-func _draw_cloud(pos: Vector2, sc: float, col: Color) -> void:
-	for o in [Vector2(0, 0), Vector2(45, 6), Vector2(-45, 6), Vector2(22, -12), Vector2(-22, -10)]:
-		draw_circle(pos + o * sc, 34.0 * sc, col)
+## 카툰 해 — 부드러운 후광 + 둥근 몸통 + 은은한 외곽선
+func _draw_sun(c: Vector2, a: float) -> void:
+	draw_circle(c, 96.0, Color(1.0, 0.94, 0.66, 0.18 * a))
+	draw_circle(c, 76.0, Color(1.0, 0.95, 0.72, 0.30 * a))
+	draw_circle(c, 56.0, Color(1.0, 0.90, 0.42, a))
+	draw_circle(c, 56.0, Color(1.0, 0.98, 0.85, 0.9 * a), false, 3.0)
+	draw_circle(c + Vector2(-16, -18), 16.0, Color(1.0, 0.98, 0.86, 0.55 * a))
+
+
+## 카툰 구름 — 폭신한 원 뭉치 + 밝은 아랫면 + 부드러운 흰 외곽선
+func _draw_cloud(pos: Vector2, sc: float, a: float) -> void:
+	var lobes := [Vector2(0, 0), Vector2(46, 8), Vector2(-46, 8), Vector2(24, -14), Vector2(-24, -12)]
+	var body := Color(0.99, 0.99, 1.0, 0.92 * a)
+	var edge := Color(0.78, 0.84, 0.95, 0.55 * a)
+	# 외곽선(살짝 큰 원)
+	for o in lobes:
+		draw_circle(pos + o * sc, 37.0 * sc, edge)
+	# 몸통
+	for o in lobes:
+		draw_circle(pos + o * sc, 34.0 * sc, body)
+	# 아랫면 그림자(살짝 회색 → 입체감)
+	draw_circle(pos + Vector2(0, 12) * sc, 30.0 * sc, Color(0.86, 0.89, 0.96, 0.35 * a))

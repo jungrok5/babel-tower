@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER, SELECT, TUTORIAL }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v3.4 · i18n"
+const GAME_VERSION := "v3.5"
 const ROTATE_STEP := PI * 0.25       # 두 손가락 탭 1회 = 45°
 
 const BASE_X := 360.0
@@ -40,10 +40,11 @@ var drag_start_world := 0.0         # 드래그 시작 지점(상대 이동 기�
 var mod_index := -1                 # 두 번째 손가락(회전)의 터치 인덱스
 var mod_start := Vector2.ZERO       # 두 번째 손가락이 처음 닿은 화면 좌표
 var mod_moved := false              # 두 번째 손가락이 드래그됐는가(드래그면 회전 안 함)
-var gyro_locked := false            # (개발용) 자이로 잠금 — 바닥을 수평 고정
-var show_guides := false            # 안정도바·중심선 표시 (기본 숨김)
+var inspect := false                # (개발용) 관찰 카메라 — 안정화 + 자유 시점(탑 전체 보기)
+var inspect_pan := Vector2.ZERO     # 관찰 모드 카메라 이동
 var last_milestone := 0             # 마지막으로 돌파한 미터 구간
-var record_broken := false          # 이번 판에 최고기록을 깼는가
+var record_broken := false          # 이번 판에 최고기록을 깼는가(갱신 팝업용)
+var record_saved := false           # 이번 판 기록 캡처 완료
 var sky: Control                    # 높이별 하늘 배경
 var world_time := 0.0               # 구름/별 애니메이션용 시간
 var wind_cur := 0.0                 # 현재 바람 세기(-1..1, 부호=방향)
@@ -62,11 +63,10 @@ var cam: Camera2D
 var ui: CanvasLayer
 var height_label: Label
 var best_label: Label
-var hint_label: Label
-var stab_fill: ColorRect
-var guides_group: Control
-var guide_btn: Button
-var gyro_btn: Button
+var ingame_ui: Control               # 인게임 상단/개발 버튼 묶음
+var pause_btn: Button
+var inspect_btn: Button
+var pause_panel: Control             # 일시정지 메뉴
 var select_panel: Control
 var tutorial: Control                # 손 모양 조작 튜토리얼 오버레이
 var tut_from_select := false         # 선택화면 '조작법'으로 열었는가(끝나면 선택화면 복귀)
@@ -174,6 +174,7 @@ func _build_world() -> void:
 	fcs.position = Vector2(0, -BLOCK_SIZE.y * 0.5)
 	floor_body.add_child(fcs)
 	_build_pedestal(floor_body)
+	_build_ground_decor(floor_body)
 
 	add_child(floor_body)
 
@@ -211,6 +212,50 @@ func _build_pedestal(parent: Node) -> void:
 	parent.add_child(_make_rect_poly(Vector2(0, -65.0), Vector2(206, 4), cap.lightened(0.18)))  # 윗면 하이라이트
 
 
+## 카툰 지면 장식 — 잔디 포기·덤불·바위 (바닥과 함께 기운다). 제단 주변을 채워 완성도↑
+func _build_ground_decor(parent: Node) -> void:
+	var leaf := Color(0.34, 0.58, 0.24)
+	var leaf_hi := Color(0.46, 0.70, 0.30)
+	var rock := Color(0.55, 0.56, 0.63)
+	# 덤불 — 원 뭉치(제단 양옆 멀찍이)
+	for bx in [-300.0, 320.0]:
+		for o in [Vector2(-26, -4), Vector2(26, -4), Vector2(0, -22), Vector2(-48, 2), Vector2(48, 2)]:
+			parent.add_child(_make_circle_poly(Vector2(bx, -14) + o, 26.0, leaf))
+		parent.add_child(_make_circle_poly(Vector2(bx - 10, -30), 15.0, leaf_hi))
+	# 바위 — 둥근 육각 돌덩이
+	for rx in [-190.0, 230.0]:
+		parent.add_child(_make_circle_poly(Vector2(rx, -10), 22.0, rock, 6))
+		parent.add_child(_make_circle_poly(Vector2(rx - 6, -16), 9.0, rock.lightened(0.18), 6))
+	# 잔디 포기 — 뾰족한 삼각 잎(지면 윗면을 따라 흩뿌림)
+	var xs := [-460.0, -360.0, -120.0, -70.0, 90.0, 150.0, 400.0, 470.0]
+	for gx in xs:
+		_add_grass_tuft(parent, gx, leaf, leaf_hi)
+
+
+## 원을 근사한 Polygon2D (덤불·바위용). seg=꼭짓점 수(작을수록 각진 돌).
+func _make_circle_poly(center: Vector2, r: float, color: Color, seg: int = 16) -> Polygon2D:
+	var p := Polygon2D.new()
+	var pts := PackedVector2Array()
+	for i in seg:
+		var a := TAU * float(i) / float(seg)
+		pts.append(center + Vector2(cos(a), sin(a)) * r)
+	p.polygon = pts
+	p.color = color
+	return p
+
+
+## 잔디 한 포기 — 뾰족한 잎 세 갈래
+func _add_grass_tuft(parent: Node, x: float, col: Color, hi: Color) -> void:
+	var base_y := 2.0
+	for dx in [-9.0, 0.0, 9.0]:
+		var blade := Polygon2D.new()
+		var tip := Vector2(x + dx * 1.6, base_y - 26.0 - absf(dx) * 0.4)
+		blade.polygon = PackedVector2Array([
+			Vector2(x + dx - 5, base_y), Vector2(x + dx + 5, base_y), tip])
+		blade.color = hi if dx == 0.0 else col
+		parent.add_child(blade)
+
+
 # ---------------------------------------------------------------- 게임 흐름
 
 ## 시작: 무엇을 쌓을지(블록 타입) 고르는 화면
@@ -221,18 +266,14 @@ func _begin_selection() -> void:
 	over_panel.visible = false
 
 
-## 블록 타입 선택 → (첫 플레이면 튜토리얼) → 보정으로 진행
+## 블록 타입 선택 → 보정으로 진행 (첫 조작법 튜토리얼은 보정 완료 후 뜬다)
 func _choose_type(id: String) -> void:
 	current_type = BlockTypes.get_type(id)
 	select_panel.visible = false
-	if not Graveyard.tutorial_seen:
-		tut_from_select = false
-		_begin_tutorial()
-	else:
-		_begin_calibration()
+	_begin_calibration()
 
 
-## 선택 화면에서 '조작법 다시 보기'
+## 설정에서 '조작법 다시 보기'
 func _replay_tutorial() -> void:
 	tut_from_select = true
 	_begin_tutorial()
@@ -253,16 +294,18 @@ func _begin_tutorial() -> void:
 	tutorial.visible = true
 
 
-func _on_tutorial_done() -> void:
+## 튜토리얼 종료. dont_show=true면 다시 안 봄. 보정 후 튜토리얼이면 바로 플레이.
+func _on_tutorial_done(dont_show: bool) -> void:
 	if tutorial != null:
 		tutorial.visible = false
-	Graveyard.set_tutorial_seen()
-	# '조작법 다시 보기'로 열었으면 선택 화면으로, 첫 플레이면 보정으로
+	if dont_show:
+		Graveyard.set_tutorial_seen()
 	if tut_from_select:
 		tut_from_select = false
-		_begin_selection()
+		if settings_panel != null and is_instance_valid(settings_panel):
+			settings_panel.visible = true    # 설정에서 열었으면 설정으로 복귀
 	else:
-		_begin_calibration()
+		state = State.READY
 
 
 func _begin_calibration() -> void:
@@ -326,12 +369,12 @@ func _rotate_block() -> void:
 	aim_rot = fmod(aim_rot + ROTATE_STEP, TAU)
 
 
-## (개발용) 자이로 잠금 토글 — 바닥을 수평 고정해 '어디까지 쌓이나' 확인용
-func _toggle_gyro_lock() -> void:
-	gyro_locked = not gyro_locked
-	gyro_btn.text = "자이로 풀기" if gyro_locked else "자이로 잠금"
-	gyro_btn.add_theme_color_override("font_color",
-		Color(1.0, 0.62, 0.3) if gyro_locked else Color(0.8, 0.82, 0.9))
+## (개발용) 관찰 카메라 토글 — 바닥을 수평 고정(안정화)하고 탑 전체를 자유롭게 본다.
+func _toggle_inspect() -> void:
+	inspect = not inspect
+	inspect_pan = Vector2.ZERO
+	if inspect_btn != null:
+		inspect_btn.modulate = Color(1.0, 0.7, 0.3, 0.95) if inspect else Color(1, 1, 1, 0.5)
 
 
 ## 다음 블록을 놓을 수 있는가 (직전 블록이 닿았거나 없으면 가능)
@@ -372,14 +415,17 @@ func _check_progress() -> void:
 		go_shake = maxf(go_shake, 9.0)
 		_vibe(35)
 		_play("milestone")
+	# 자기 최고 높이를 넘으면(첫 판 포함) 그 순간을 캡처해 결과 공유에 쓴다.
 	var best := Graveyard.best_for(current_type.get("id", "brick"))
-	if not record_broken and best > 0 and _peak_meters() > best:
-		record_broken = true
-		_popup(Locale.t("record_break"), Color(1.0, 0.82, 0.25))
-		go_shake = maxf(go_shake, 15.0)
-		_vibe(70)
-		_play("record")
+	if not record_saved and _peak_meters() > best:
+		record_saved = true
 		_want_capture = true            # 이 순간 스크린샷 캡처(다음 프레임)
+		if best > 0:                    # 기존 기록이 있었을 때만 '갱신' 이펙트
+			record_broken = true
+			_popup(Locale.t("record_break"), Color(1.0, 0.82, 0.25))
+			go_shake = maxf(go_shake, 15.0)
+			_vibe(70)
+			_play("record")
 
 
 ## 진동(설정에 따라 켜짐/꺼짐)
@@ -404,12 +450,6 @@ func _popup(text: String, color: Color) -> void:
 	tw.tween_interval(0.5)
 	tw.tween_property(l, "modulate:a", 0.0, 0.5)
 	tw.tween_callback(l.queue_free)
-
-
-func _toggle_guides() -> void:
-	show_guides = not show_guides
-	guides_group.visible = show_guides
-	guide_btn.text = "가이드 끄기" if show_guides else "가이드"
 
 
 func _top_block() -> Block:
@@ -472,8 +512,13 @@ func _restart() -> void:
 	mod_index = -1
 	last_milestone = 0
 	record_broken = false
+	record_saved = false
 	record_img = null
 	_want_capture = false
+	inspect = false
+	inspect_pan = Vector2.ZERO
+	if inspect_btn != null:
+		inspect_btn.modulate = Color(1, 1, 1, 0.5)
 	wind_cur = 0.0
 	wind_target = 0.0
 	wind_gusting = false
@@ -498,18 +543,24 @@ func _restart() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	# 어디를 눌러도 벽돌은 '중앙'에서 시작. 누른 지점 기준으로 좌우로 끌면 그만큼 이동,
 	# 떼면 낙하. (터치는 emulate_mouse_from_touch로 마우스 이벤트가 된다)
-	# 키보드(개발/데스크톱): Space=낙하, R=회전, G=자이로 잠금
+	# 키보드(개발/데스크톱): Space=낙하, R=회전, G=관찰 카메라
 	if event is InputEventKey:
 		if event.pressed and not event.echo:
 			match event.keycode:
 				KEY_SPACE:
-					if state == State.READY and _can_drop():
+					if state == State.READY and _can_drop() and not inspect:
 						_drop_block(_clamp_aim(BASE_X))
 				KEY_R:
 					if state == State.READY:
 						_rotate_block()
 				KEY_G:
-					_toggle_gyro_lock()
+					_toggle_inspect()
+		return
+
+	# 관찰 모드: 드래그로 카메라를 자유롭게 이동(탑 상단 확인). 낙하/조준 없음.
+	if inspect:
+		if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT):
+			inspect_pan += event.relative / cam.zoom.x
 		return
 
 	# 첫 손가락(또는 마우스): 조준/낙하. (터치는 첫 손가락이 마우스로 에뮬레이션됨)
@@ -569,8 +620,8 @@ func _physics_process(delta: float) -> void:
 	# 센서 기울기만큼 바닥(판자)을 기울인다(경사). 중력은 항상 아래로 고정.
 	# 바닥이 수평이면 블록은 잠들어(sleep) 떨림이 없다. 기울면 경사 때문에 위 블록이 넘어진다.
 	var target_angle := 0.0
-	if gyro_locked:
-		# (개발용) 자이로 잠금: 바닥을 수평 고정하고 바람도 잦아들게 한다
+	if inspect:
+		# (개발용) 관찰 모드: 바닥을 수평 고정하고 바람도 잦아들게 한다(안정화)
 		wind_cur = lerpf(wind_cur, 0.0, 0.1)
 	else:
 		target_angle = _tilt_amount() * MAX_TILT_ANGLE
@@ -585,7 +636,8 @@ func _physics_process(delta: float) -> void:
 
 	peak_px = maxf(peak_px, _height_px())
 	_update_birds(delta)
-	_check_collapse()
+	if not inspect:                          # 관찰 중엔 붕괴 판정 안 함(자유롭게 보기)
+		_check_collapse()
 
 	# 안전장치: 어떤 이유로든 착지 신호가 안 오면 잠깐 뒤 잠금 해제(소프트락 방지)
 	if settling != null:
@@ -735,15 +787,8 @@ func _draw() -> void:
 		draw_dashed_line(Vector2(BASE_X - 420, ry), Vector2(BASE_X + 420, ry),
 			Color(1.0, 0.82, 0.3, 0.5), 3.0, 22.0)
 		if ui_font:
-			draw_string(ui_font, Vector2(BASE_X - 400, ry - 14), "최고 기록 %d m" % best_m,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.82, 0.3, 0.7))
-
-	# 중심(원위치) 세로 기준선 — 가이드 켤 때만
-	if show_guides:
-		draw_dashed_line(
-			Vector2(BASE_X, top_edge - DROP_HEIGHT - 80.0),
-			Vector2(BASE_X, GROUND_TOP_Y + 40.0),
-			Color(0.55, 0.6, 0.75, 0.28), 2.0, 14.0)
+			draw_string(ui_font, Vector2(BASE_X - 400, ry - 14), "%s %d m" % [Locale.t("best_short"), best_m],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1.0, 0.82, 0.3, 0.7))
 
 	# 2) 조준 중일 때만: 회전을 반영한 실제 블록 모양 고스트 + 바닥까지 내려가는 낙하 컬럼
 	if aiming:
@@ -769,7 +814,14 @@ func _draw() -> void:
 func _update_camera(delta: float) -> void:
 	var target: Vector2
 	var z: float
-	if state == State.OVER:
+	if inspect and state == State.READY:
+		# (개발용) 관찰: 지면~꼭대기 전체를 담고, 드래그 이동(inspect_pan) 반영
+		var tower_top_y := minf(_lowest_top(), GROUND_TOP_Y - 300.0)
+		var mid_y := (GROUND_TOP_Y + tower_top_y) * 0.5
+		var needed := (GROUND_TOP_Y - tower_top_y) + 400.0
+		z = clampf(1280.0 / needed, 0.08, 1.0)
+		target = Vector2(BASE_X, mid_y) + inspect_pan
+	elif state == State.OVER:
 		# 붕괴 시: 지면~꼭대기 전체가 보이도록 줌아웃 (무너지는 걸 다 볼 수 있게)
 		var tower_top_y := minf(_lowest_top(), GROUND_TOP_Y - 200.0)
 		var mid_y := (GROUND_TOP_Y + tower_top_y) * 0.5
@@ -783,7 +835,8 @@ func _update_camera(delta: float) -> void:
 		target = Vector2(BASE_X, _tower_top_edge() - 200.0)
 		# 높이 오를수록 줌아웃 → 작은 떨림도 크게 보이는 "공포" 시스템
 		z = clampf(1.0 - float(score) * 0.03, 0.42, 1.0)
-	cam.position = cam.position.lerp(target, 0.09)
+	var lerp_amt := 0.16 if inspect else 0.09
+	cam.position = cam.position.lerp(target, lerp_amt)
 	cam.zoom = cam.zoom.lerp(Vector2(z, z), 0.06)
 
 	# 카메라 셰이크는 '붕괴 순간'에만. (예전엔 센서 움직임에 반응해 화면이 위아래로
@@ -794,34 +847,30 @@ func _update_camera(delta: float) -> void:
 
 
 func _update_ui(delta: float) -> void:
-	height_label.text = "%d m" % _meters()
-	best_label.text = "%s %d m" % [Locale.t("best_short"), maxi(Graveyard.best_for(current_type.get("id", "brick")), _peak_meters())]
+	# 인게임 HUD는 플레이(READY) 중에만 보인다
+	var playing := state == State.READY
+	height_label.visible = playing
+	best_label.visible = playing
+	ingame_ui.visible = playing
+	if playing:
+		height_label.text = "%d m" % _meters()
+		best_label.text = "%s %d m" % [Locale.t("best_short"),
+			maxi(Graveyard.best_for(current_type.get("id", "brick")), _peak_meters())]
 
-	if show_guides:
-		# 안정도 = 얼마나 수평인가. 기울일수록 빨갛게.
-		var inst := clampf(absf(Motion.get_sway()) * 1.1, 0.0, 1.0)
-		stab_fill.size.x = 300.0 * clampf(1.0 - inst, 0.02, 1.0)
-		stab_fill.color = Color(0.32, 0.85, 0.45).lerp(Color(0.92, 0.26, 0.26), inst)
-
-	match state:
-		State.CALIB:
-			hint_label.text = ""
-			if awaiting_sensor:
-				calib_label.text = Locale.t("sensor_prompt")
-			else:
-				calib_timer -= delta
-				if not Motion.is_calibrating():
-					calib_panel.visible = false
+	if state == State.CALIB:
+		if awaiting_sensor:
+			calib_label.text = Locale.t("sensor_prompt")
+		else:
+			calib_timer -= delta
+			calib_label.text = Locale.t("calib_wait")
+			if not Motion.is_calibrating():
+				calib_panel.visible = false
+				# 보정 완료 → 첫 플레이면 조작법 튜토리얼, 아니면 바로 시작
+				if not Graveyard.tutorial_seen:
+					tut_from_select = false
+					_begin_tutorial()
+				else:
 					state = State.READY
-				calib_label.text = Locale.t("calib_wait")
-		State.READY:
-			hint_label.text = Locale.t("hint_play")
-		State.OVER:
-			hint_label.text = ""
-		State.SELECT:
-			hint_label.text = ""
-		State.TUTORIAL:
-			hint_label.text = ""
 
 
 # ---------------------------------------------------------------- UI 구성
@@ -841,6 +890,7 @@ func _build_ui() -> void:
 
 	ui = CanvasLayer.new()
 	ui.layer = 5                     # 전경 바람 이펙트(layer 1)보다 위에 UI가 오도록
+	ui.process_mode = Node.PROCESS_MODE_ALWAYS   # 일시정지 중에도 메뉴 동작
 	add_child(ui)
 
 	# 현재 높이 (미터) — 좌상단, 크게
@@ -849,70 +899,32 @@ func _build_ui() -> void:
 	ui.add_child(height_label)
 
 	# 최고 기록 (미터) — 우상단
-	best_label = _make_label("최고 0 m", 30, Color(0.82, 0.7, 0.35))
-	best_label.position = Vector2(380, 56)
-	best_label.size = Vector2(300, 40)
+	best_label = _make_label("", 28, Color(0.82, 0.7, 0.35))
+	best_label.position = Vector2(360, 52)
+	best_label.size = Vector2(236, 40)
 	best_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	ui.add_child(best_label)
 
-	# 안정도·중심선 묶음 (기본 숨김, 버튼으로 토글)
-	guides_group = Control.new()
-	guides_group.set_anchors_preset(Control.PRESET_FULL_RECT)
-	guides_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	guides_group.visible = show_guides
-	ui.add_child(guides_group)
-	var stab_bg := ColorRect.new()
-	stab_bg.color = Color(0.16, 0.17, 0.22)
-	stab_bg.position = Vector2(210, 132)
-	stab_bg.size = Vector2(300, 16)
-	guides_group.add_child(stab_bg)
-	stab_fill = ColorRect.new()
-	stab_fill.color = Color(0.32, 0.85, 0.45)
-	stab_fill.position = Vector2(210, 132)
-	stab_fill.size = Vector2(300, 16)
-	guides_group.add_child(stab_fill)
-	var stab_cap := _make_label("안정도", 22, Color(0.55, 0.57, 0.65))
-	stab_cap.position = Vector2(210, 150)
-	guides_group.add_child(stab_cap)
-
-	# 가이드 on/off 토글 버튼 (우상단)
-	guide_btn = Button.new()
-	guide_btn.text = "가이드"
-	guide_btn.add_theme_font_override("font", ui_font)
-	guide_btn.add_theme_font_size_override("font_size", 24)
-	guide_btn.position = Vector2(548, 108)
-	guide_btn.size = Vector2(132, 52)
-	guide_btn.focus_mode = Control.FOCUS_NONE
-	guide_btn.pressed.connect(_toggle_guides)
-	ui.add_child(guide_btn)
-
-	# (개발용) 자이로 잠금 토글 — 가이드 버튼 아래
-	gyro_btn = Button.new()
-	gyro_btn.text = "자이로 잠금"
-	gyro_btn.add_theme_font_override("font", ui_font)
-	gyro_btn.add_theme_font_size_override("font_size", 22)
-	gyro_btn.position = Vector2(508, 168)
-	gyro_btn.custom_minimum_size = Vector2(172, 48)
-	gyro_btn.focus_mode = Control.FOCUS_NONE
-	gyro_btn.pressed.connect(_toggle_gyro_lock)
-	ui.add_child(gyro_btn)
-
-	# 하단 힌트
-	hint_label = _make_label("", 30, Color(0.78, 0.8, 0.88))
-	hint_label.position = Vector2(0, 1120)
-	hint_label.size = Vector2(720, 120)
-	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	ui.add_child(hint_label)
-
-	# 빌드 버전 (좌하단) — 캐시 확인용
-	var ver := _make_label(GAME_VERSION, 22, Color(0.45, 0.47, 0.55))
-	ver.position = Vector2(20, 1234)
-	ui.add_child(ver)
+	# 인게임 상단 버튼 그룹 (플레이 중에만 보임)
+	ingame_ui = Control.new()
+	ingame_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ingame_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(ingame_ui)
+	# 메뉴(일시정지) 버튼 — 우상단
+	pause_btn = _make_text_button("=", 34, Vector2(64, 60), _open_pause)
+	pause_btn.position = Vector2(614, 44)
+	ingame_ui.add_child(pause_btn)
+	# (개발용) 관찰 카메라 토글 — 좌하단, 작고 은은하게
+	inspect_btn = _make_text_button("DEV", 20, Vector2(84, 46), _toggle_inspect)
+	inspect_btn.position = Vector2(20, 1174)
+	inspect_btn.modulate = Color(1, 1, 1, 0.5)
+	ingame_ui.add_child(inspect_btn)
 
 	_build_select_panel()
 	_build_leaderboard_panel()
 	_build_settings_panel()
 	_build_language_panel()
+	_build_pause_panel()
 	_build_calib_panel()
 	_build_over_panel()
 
@@ -945,11 +957,13 @@ func _build_select_panel() -> void:
 	box.add_child(_spacer(2))
 	var actions := HBoxContainer.new()
 	actions.alignment = BoxContainer.ALIGNMENT_CENTER
-	actions.add_theme_constant_override("separation", 14)
-	actions.add_child(_make_text_button(Locale.t("view_leaderboard"), 26, Vector2(200, 60), _open_leaderboard))
-	actions.add_child(_make_text_button(Locale.t("how_to"), 26, Vector2(150, 60), _replay_tutorial))
-	actions.add_child(_make_text_button(Locale.t("settings"), 26, Vector2(150, 60), _open_settings))
+	actions.add_theme_constant_override("separation", 16)
+	actions.add_child(_make_text_button(Locale.t("view_leaderboard"), 28, Vector2(220, 64), _open_leaderboard))
+	actions.add_child(_make_text_button(Locale.t("settings"), 28, Vector2(180, 64), _open_settings))
 	box.add_child(_centered(actions))
+	box.add_child(_spacer(2))
+	var ver := _make_label(GAME_VERSION, 20, Color(0.4, 0.42, 0.5))
+	box.add_child(_centered(ver))
 	ui.add_child(select_panel)
 
 
@@ -1152,6 +1166,10 @@ func _refresh_settings() -> void:
 	settings_body.add_child(_settings_row(Locale.t("google_play"),
 		Locale.t("connected") if Settings.gp_connected else Locale.t("connect"),
 		green if Settings.gp_connected else gray, _toggle_gp))
+	settings_body.add_child(_settings_row(Locale.t("how_to_replay"), ">", Color(0.8, 0.85, 0.95), _settings_replay_tutorial))
+	settings_body.add_child(_spacer(4))
+	settings_body.add_child(_centered(_make_label("%s  %s" % [Locale.t("version"), GAME_VERSION],
+		22, Color(0.45, 0.47, 0.55))))
 
 
 func _settings_row(label: String, value: String, vcol: Color, cb: Callable) -> Control:
@@ -1193,11 +1211,56 @@ func _toggle_gp() -> void:
 	_refresh_settings()
 
 
+func _settings_replay_tutorial() -> void:
+	settings_panel.visible = false
+	_replay_tutorial()
+
+
 func _lang_native(code: String) -> String:
 	for l in Locale.LANGUAGES:
 		if l[0] == code:
 			return l[1]
 	return code
+
+
+# ---- 일시정지 메뉴 ----
+
+func _build_pause_panel() -> void:
+	pause_panel = _make_overlay(Color(0.03, 0.04, 0.07, 0.86))
+	pause_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	pause_panel.visible = false
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pause_panel.add_child(center)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 18)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	center.add_child(box)
+	box.add_child(_centered(_make_label("GENESIS 11", 40, Color(0.86, 0.78, 0.55))))
+	box.add_child(_spacer(10))
+	box.add_child(_centered(_make_text_button(Locale.t("resume"), 34, Vector2(300, 84), _close_pause)))
+	box.add_child(_centered(_make_text_button(Locale.t("settings"), 30, Vector2(300, 74), _open_settings)))
+	box.add_child(_centered(_make_text_button(Locale.t("home"), 30, Vector2(300, 74), _pause_home)))
+	ui.add_child(pause_panel)
+
+
+func _open_pause() -> void:
+	if state != State.READY:
+		return
+	pause_panel.visible = true
+	ui.move_child(pause_panel, ui.get_child_count() - 1)
+	get_tree().paused = true
+
+
+func _close_pause() -> void:
+	get_tree().paused = false
+	pause_panel.visible = false
+
+
+func _pause_home() -> void:
+	get_tree().paused = false
+	pause_panel.visible = false
+	_restart_to_select()
 
 
 # ---- 언어 선택 (검색 포함, 100개국 대비) ----
@@ -1393,12 +1456,18 @@ func _show_game_over() -> void:
 			line.strip_edges(), 26, Color(0.55, 0.5, 0.45))))
 
 	over_body.add_child(_spacer(20))
-	# 최고기록 갱신 시: 그 순간 스크린샷 공유 버튼
-	if record_broken and record_img != null:
-		over_body.add_child(_centered(_make_text_button(Locale.t("share"), 32, Vector2(280, 78), _share_record)))
-	over_body.add_child(_centered(_make_text_button(Locale.t("retry"), 38, Vector2(280, 90), _restart)))
-	over_body.add_child(_centered(_make_text_button(Locale.t("view_leaderboard"), 30, Vector2(280, 72), _open_leaderboard)))
-	over_body.add_child(_centered(_make_text_button(Locale.t("change_block"), 30, Vector2(280, 72), _restart_to_select)))
+	# 최고 높이를 캡처했으면 결과 공유 버튼 (강조색)
+	if record_img != null:
+		var share := _make_text_button(Locale.t("share"), 32, Vector2(300, 84), _share_record)
+		_style_button(share, Color(0.20, 0.42, 0.66), Color(0.45, 0.72, 1.0))
+		over_body.add_child(_centered(share))
+	over_body.add_child(_centered(_make_text_button(Locale.t("retry"), 34, Vector2(300, 84), _restart)))
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 14)
+	row.add_child(_make_text_button(Locale.t("view_leaderboard"), 26, Vector2(190, 64), _open_leaderboard))
+	row.add_child(_make_text_button(Locale.t("change_block"), 26, Vector2(190, 64), _restart_to_select))
+	over_body.add_child(_centered(row))
 
 	over_panel.visible = true
 

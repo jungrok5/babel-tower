@@ -1,9 +1,9 @@
 extends Control
 ## 손 모양이 실제로 제스처를 시연하는 인게임 튜토리얼(텍스트 카드가 아니라 손이 직접 움직인다).
 ## 3단계 루프: ① 끌어서 위치  ② 두 손가락 탭 = 회전  ③ 기기를 수평으로.
-## "시작하기"를 누르면 finished를 emit한다.
+## "시작하기"를 누르면 finished(dont_show)를 emit한다.
 
-signal finished
+signal finished(dont_show)
 
 const VW := 720.0
 const VH := 1280.0
@@ -21,18 +21,33 @@ func setup(f: Font) -> void:
 	font = f
 
 
+var _dont_show: CheckBox
+
+
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	# 다음부터 안 보기 체크박스
+	_dont_show = CheckBox.new()
+	_dont_show.text = "  " + Locale.t("dont_show")
+	if font:
+		_dont_show.add_theme_font_override("font", font)
+	_dont_show.add_theme_font_size_override("font_size", 28)
+	_dont_show.add_theme_color_override("font_color", Color(0.8, 0.83, 0.9))
+	_dont_show.size = Vector2(400, 50)
+	_dont_show.position = Vector2(210, 1096)
+	_dont_show.focus_mode = Control.FOCUS_NONE
+	add_child(_dont_show)
+	# 시작하기 버튼
 	var start := Button.new()
 	start.text = Locale.t("start")
 	if font:
 		start.add_theme_font_override("font", font)
 	start.add_theme_font_size_override("font_size", 38)
-	start.custom_minimum_size = Vector2(300, 88)
-	start.position = Vector2(210, 1150)
+	start.custom_minimum_size = Vector2(300, 84)
+	start.position = Vector2(210, 1160)
 	start.focus_mode = Control.FOCUS_NONE
-	start.pressed.connect(func(): finished.emit())
+	start.pressed.connect(func(): finished.emit(_dont_show.button_pressed))
 	add_child(start)
 
 
@@ -103,9 +118,9 @@ func _draw() -> void:
 		_draw_level_hint(Vector2(360.0, 430.0), wob)
 
 	if font:
-		draw_string(font, Vector2(24, 1064), cap, HORIZONTAL_ALIGNMENT_CENTER, VW - 48, 32,
+		draw_string(font, Vector2(24, 990), cap, HORIZONTAL_ALIGNMENT_CENTER, VW - 48, 32,
 			Color(0.86, 0.89, 0.96))
-		draw_string(font, Vector2(24, 1108), Locale.t("tut_hint"), HORIZONTAL_ALIGNMENT_CENTER,
+		draw_string(font, Vector2(24, 1034), Locale.t("tut_hint"), HORIZONTAL_ALIGNMENT_CENTER,
 			VW - 48, 24, Color(0.55, 0.58, 0.66))
 
 

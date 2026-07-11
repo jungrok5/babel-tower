@@ -71,7 +71,8 @@ const STRINGS := {
 		"sensor_on": "Turn on sensor",
 		"blk_brick": "Brick", "blk_box": "Box", "blk_desk": "Desk", "blk_chair": "Chair",
 		"blk_book": "Book", "blk_log": "Log", "blk_ball": "Ball",
-		"best_short": "Best",
+		"best_short": "Best", "dont_show": "Don't show again", "resume": "Resume",
+		"home": "Home", "how_to_replay": "How to play", "version": "Version",
 	},
 	"ko": {
 		"select_title": "무엇을 쌓을까요?",
@@ -116,7 +117,8 @@ const STRINGS := {
 		"sensor_on": "센서 켜기",
 		"blk_brick": "벽돌", "blk_box": "상자", "blk_desk": "책상", "blk_chair": "의자",
 		"blk_book": "책", "blk_log": "통나무", "blk_ball": "공",
-		"best_short": "최고",
+		"best_short": "최고", "dont_show": "다음부터 안 보기", "resume": "계속하기",
+		"home": "홈", "how_to_replay": "조작법 보기", "version": "버전",
 	},
 	"ja": {
 		"select_title": "何を積みますか？",
@@ -161,7 +163,8 @@ const STRINGS := {
 		"sensor_on": "センサーオン",
 		"blk_brick": "レンガ", "blk_box": "箱", "blk_desk": "机", "blk_chair": "椅子",
 		"blk_book": "本", "blk_log": "丸太", "blk_ball": "ボール",
-		"best_short": "最高",
+		"best_short": "最高", "dont_show": "次回から表示しない", "resume": "続ける",
+		"home": "ホーム", "how_to_replay": "操作方法", "version": "バージョン",
 	},
 }
 

@@ -77,18 +77,25 @@ static func get_type(id: String) -> Dictionary:
 
 
 ## 타입의 파트들을 CanvasItem에 그린다 (블록 본체·선택 아이콘 공용). sc = 배율.
+## 카툰풍: 굵고 어두운 외곽선 + 상단 하이라이트.
+const OUTLINE := Color(0.13, 0.11, 0.12)
+
 static func draw_parts(ci: CanvasItem, type: Dictionary, sc: float) -> void:
+	var ow := maxf(1.5, 3.5 * sc)
 	for p in type["parts"]:
 		if p["kind"] == "rect":
 			var r: Rect2 = p["rect"]
 			var rr := Rect2(r.position * sc, r.size * sc)
 			var col: Color = p["color"]
 			ci.draw_rect(rr, col)
-			ci.draw_rect(rr, col.darkened(0.4), false, maxf(1.0, 2.0 * sc))
+			# 상단 밝은 띠(입체감)
+			ci.draw_rect(Rect2(rr.position, Vector2(rr.size.x, rr.size.y * 0.28)), col.lightened(0.14))
+			ci.draw_rect(rr, OUTLINE, false, ow)
 		else:
 			var col2: Color = p["color"]
 			var pos: Vector2 = p["pos"]
 			var rad: float = p["r"]
 			ci.draw_circle(pos * sc, rad * sc, col2)
-			ci.draw_circle(pos * sc, rad * sc, col2.darkened(0.35), false, maxf(1.0, 2.0 * sc))
-			ci.draw_circle((pos + Vector2(-rad * 0.32, -rad * 0.34)) * sc, rad * 0.2 * sc, col2.lightened(0.4))
+			ci.draw_circle((pos + Vector2(-rad * 0.3, -rad * 0.34)) * sc, rad * 0.42 * sc, col2.lightened(0.16))
+			ci.draw_circle((pos + Vector2(-rad * 0.34, -rad * 0.36)) * sc, rad * 0.16 * sc, col2.lightened(0.4))
+			ci.draw_arc(pos * sc, rad * sc, 0, TAU, 40, OUTLINE, ow)
