@@ -1,0 +1,68 @@
+name: Screenshots (rendered)
+
+# 실제로 렌더된 게임 화면을 여러 상황에서 캡처한다(Claude의 시각 검증용).
+# 헤드리스는 렌더를 안 하므로, xvfb(가상 디스플레이) + 소프트웨어 GL(Mesa/llvmpipe)로
+# 실제 프레임을 그려 PNG로 저장하고, 결과를 'screenshots' 브랜치로 올린다.
+
+on:
+  push:
+    branches:
+      - claude/stillness-tower-game-tccfaj
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: "4.7"
+  GODOT_RELEASE: "stable"
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xvfb + software OpenGL (Mesa)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1 libgl1-mesa-dri libglx-mesa0 mesa-utils
+
+      - name: Download Godot (editor)
+        run: |
+          BASE="https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-${GODOT_RELEASE}"
+          EDITOR="Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_linux.x86_64"
+          curl -L -o godot.zip "${BASE}/${EDITOR}.zip"
+          unzip -o godot.zip
+          mv "${EDITOR}" godot
+          chmod +x godot
+
+      - name: Import project
+        run: ./godot --headless --import . || true
+
+      - name: Capture screenshots (xvfb + software GL)
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: "llvmpipe"
+        run: |
+          xvfb-run -a --server-args="-screen 0 720x1280x24" \
+            ./godot --resolution 720x1280 --rendering-driver opengl3 \
+            --audio-driver Dummy res://test/Screenshot.tscn 2>&1 | tee shots.log
+          echo "----- shots -----"
+          grep "\[SHOT\]" shots.log || true
+          ls -la shots || true
+
+      - name: Publish to 'screenshots' branch
+        run: |
+          if [ -z "$(ls -A shots 2>/dev/null)" ]; then
+            echo "No screenshots produced — see shots.log above."
+            exit 1
+          fi
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git checkout --orphan screenshots
+          git reset
+          find . -maxdepth 1 -mindepth 1 ! -name shots ! -name .git -exec rm -rf {} +
+          git add shots
+          git commit -m "screenshots for ${GITHUB_SHA}"
+          git push -f origin screenshots
