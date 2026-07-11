@@ -17,14 +17,14 @@ var _motes := []            # [base_x, y, size] — 바람에 실려 날리는 �
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for i in 22:
+	for i in 16:
 		_streaks.append([randf() * VW, randf() * VH, randf_range(70, 190),
-			randf_range(2.0, 4.0), randf_range(0.5, 1.0)])
+			randf_range(1.6, 3.2), randf_range(0.5, 1.0)])
 	for i in 6:
 		_wisps.append([randf() * VW, randf_range(80, VH - 120), randf_range(0.8, 1.7),
 			randf_range(0.5, 1.0)])
-	for i in 16:
-		_motes.append([randf() * VW, randf() * VH, randf_range(1.6, 3.4)])
+	for i in 9:
+		_motes.append([randf() * VW, randf() * VH, randf_range(1.6, 3.0)])
 
 
 func _process(delta: float) -> void:
@@ -46,29 +46,29 @@ func _draw() -> void:
 		_draw_wisp(Vector2(x, w[1] + sin(t * 0.6 + w[0]) * 8.0), sc * (0.7 + 0.6 * s),
 			Color(0.9, 0.94, 1.0, s * 0.10 * w[3]), dir)
 
-	# 바람결(speed line) — 길이·굵기·투명도·개수가 세기에 비례. 방향은 흐르는 쪽.
-	var speed := 320.0 + 900.0 * s
-	var shown := int(clampf(s * 1.3, 0.25, 1.0) * _streaks.size())
+	# 바람결(speed line) — 길이·굵기·투명도·개수가 세기에 비례. 방향은 흐르는 쪽. (은은하게)
+	var speed := 300.0 + 820.0 * s
+	var shown := int(clampf(s * 0.85, 0.12, 0.5) * _streaks.size())
 	for i in range(shown):
 		var st = _streaks[i]
 		var x := fmod(st[0] + t * dir * speed + 100000.0, VW + 400.0) - 200.0
 		var y: float = st[1] + sin(t * 1.5 + st[0] * 0.05) * 6.0
-		var ln: float = st[2] * (0.35 + 0.95 * s)
-		var a: float = s * 0.5 * st[4]
-		var th: float = st[3] * (0.6 + 0.7 * s)
+		var ln: float = st[2] * (0.35 + 0.9 * s)
+		var a: float = s * 0.3 * st[4]
+		var th: float = st[3] * (0.6 + 0.6 * s)
 		# 꼬리가 옅어지는 두 겹(머리는 진하게, 꼬리는 투명하게)
 		var head := Vector2(x, y)
 		var tail := Vector2(x - dir * ln, y)
 		draw_line(head, tail.lerp(head, 0.4), Color(0.92, 0.96, 1.0, a), th)
 		draw_line(tail, tail.lerp(head, 0.4), Color(0.92, 0.96, 1.0, a * 0.35), th)
 
-	# 티끌 — 바람에 빠르게 실려 날아가 속도감/방향을 준다
-	if s > 0.35:
-		var mspeed := 500.0 + 700.0 * s
+	# 티끌 — 강한 바람에서만 옅게 실려 날아가 방향/속도감을 준다
+	if s > 0.45:
+		var mspeed := 480.0 + 660.0 * s
 		for m in _motes:
 			var x := fmod(m[0] + t * dir * mspeed + 100000.0, VW + 200.0) - 100.0
 			var y: float = m[1] + sin(t * 3.0 + m[0]) * 14.0 * s
-			draw_circle(Vector2(x, y), m[2], Color(0.96, 0.97, 1.0, (s - 0.3) * 0.5))
+			draw_circle(Vector2(x, y), m[2], Color(0.96, 0.97, 1.0, (s - 0.45) * 0.4))
 
 
 func _draw_wisp(pos: Vector2, sc: float, col: Color, dir: float) -> void:

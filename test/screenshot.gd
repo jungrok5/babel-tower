@@ -93,13 +93,13 @@ func _ready() -> void:
 	main._toggle_inspect()             # inspect ON (지면=맑음 + 나비 + 안내)
 	await _settle(55)
 	await _shot("04_inspect")          # 지면: 맑음 + 나비 + 해
-	main.inspect_pan.y = -266.0        # ~65m: 구름 가득 + 풍선/비행기/새떼
+	main.inspect_pan.y = -770.0        # ~130m: 구름 가득 + 풍선/비행기/새떼
 	await _settle(70)
 	await _shot("04c_clouds")
-	main.inspect_pan.y = -770.0        # ~130m: 위성/우주정거장/우주인 + 권운
+	main.inspect_pan.y = -1700.0       # ~250m: 위성/우주정거장 + 권운
 	await _settle(70)
 	await _shot("04d_space_life")
-	main.inspect_pan.y = -1196.0       # ~185m: 우주인/행성/별/별똥별
+	main.inspect_pan.y = -2560.0       # ~360m: 우주인/행성/별/별똥별
 	await _settle(80)
 	await _shot("04b_inspect_space")
 	main._toggle_inspect()             # inspect OFF

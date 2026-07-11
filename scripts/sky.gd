@@ -3,18 +3,18 @@ extends Control
 ## 구름·별·환경요소(나비·새떼·풍선·비행기·위성·우주정거장·우주인·행성·별똥별)를
 ## 각자의 고도에 배치하고, 현재 고도만큼 아래로 밀어 그린다(패럴랙스) → 올라갈수록 아래로 지나간다.
 ##
-## 대기층 순서(아래→위, 미터):
-##   0~15   맑음(나비)
-##   18~65  높은 조각구름 · 새떼
-##   20~250 바람
-##   35~95  구름 가득
-##   45~110 비행기
-##   95~110 구름 위 맑음
-##   80~180 위성
-##   105~150 성층권(권운)
-##   100~   별
-##   110~200 우주정거장 · 우주인(희귀)
-##   150~   행성 · 별똥별 · 깊은 우주(칠흑)
+## 대기층 순서(아래→위, 미터) — 간격을 넓혀 올라갈수록 천천히 하나씩 등장:
+##   0~40    맑음(나비)
+##   30~110  높은 조각구름 · 새떼
+##   40~260  바람
+##   90~200  구름 가득
+##   90~170  비행기
+##   170~280 위성
+##   230~300 성층권(권운)
+##   220~    별
+##   240~340 우주정거장
+##   300~410 우주인(희귀)
+##   320~    행성 · 별똥별 · 깊은 우주(칠흑, ~360+)
 
 var meters: float = 0.0
 var t: float = 0.0
@@ -29,15 +29,14 @@ const OUTLINE := Color(0.12, 0.11, 0.14)
 # (미터, 위색, 아래색) — 대낮 → 파랑 → 성층권 남색 → 우주 칠흑 (고도 낮춰 도달 쉽게)
 const SKY := [
 	[0.0,   Color(0.40, 0.68, 0.95), Color(0.74, 0.90, 0.99)],
-	[60.0,  Color(0.24, 0.48, 0.84), Color(0.48, 0.70, 0.95)],
-	[110.0, Color(0.12, 0.20, 0.52), Color(0.24, 0.36, 0.66)],
-	[150.0, Color(0.05, 0.07, 0.24), Color(0.10, 0.13, 0.34)],
-	[185.0, Color(0.010, 0.012, 0.03), Color(0.02, 0.02, 0.06)],
+	[110.0, Color(0.24, 0.48, 0.84), Color(0.48, 0.70, 0.95)],
+	[220.0, Color(0.12, 0.20, 0.52), Color(0.24, 0.36, 0.66)],
+	[300.0, Color(0.05, 0.07, 0.24), Color(0.10, 0.13, 0.34)],
+	[360.0, Color(0.010, 0.012, 0.03), Color(0.02, 0.02, 0.06)],
 ]
 
 var _clouds: Array = []       # {alt,x,scale,par,kind,vx}
 var _stars: Array = []        # {alt,x,size,ph,par}
-var _streaks: Array = []      # {alt,len,x0}
 var _env: Array = []          # {kind,alt,x,par,...}
 
 const _BAL_COLS := [Color(0.92,0.28,0.28), Color(0.30,0.55,0.95), Color(0.98,0.80,0.25),
@@ -54,55 +53,51 @@ func _ready() -> void:
 
 
 func _gen_sky() -> void:
-	# 구름 밴드: [고도min, 고도max, 개수, 종류]
-	for b in [[18.0, 65.0, 6, "puffy"], [35.0, 95.0, 20, "puffy"], [105.0, 150.0, 8, "cirrus"]]:
+	# 구름 밴드: [고도min, 고도max, 개수, 종류] — 수 줄이고 고도 간격 넓힘(덜 산만하게)
+	for b in [[40.0, 110.0, 4, "puffy"], [90.0, 200.0, 12, "puffy"], [230.0, 300.0, 4, "cirrus"]]:
 		for i in int(b[2]):
 			_clouds.append({"alt": randf_range(b[0], b[1]), "x": randf() * VW,
-				"scale": randf_range(0.7, 1.5), "par": randf_range(0.78, 1.16),
-				"kind": b[3], "vx": randf_range(-16.0, 16.0)})
+				"scale": randf_range(0.75, 1.5), "par": randf_range(0.78, 1.16),
+				"kind": b[3], "vx": randf_range(-11.0, 11.0)})
 	_clouds.sort_custom(func(a, c): return float(a["par"]) < float(c["par"]))
-	for i in 110:
-		_stars.append({"alt": randf_range(105.0, 380.0), "x": randf() * VW,
-			"size": randf_range(1.0, 2.7), "ph": randf() * TAU, "par": randf_range(0.30, 0.52)})
-	for i in 16:
-		_streaks.append({"alt": randf_range(20.0, 250.0), "len": randf_range(40.0, 120.0), "x0": randf() * VW})
+	for i in 80:
+		_stars.append({"alt": randf_range(230.0, 640.0), "x": randf() * VW,
+			"size": randf_range(1.0, 2.5), "ph": randf() * TAU, "par": randf_range(0.30, 0.5)})
 
 
 ## 환경요소를 매 판마다 새로 뿌린다(랜덤 · 희귀 요소 포함) → "이번엔 뭐가 보일까"
 func regen_env() -> void:
 	_env.clear()
-	for i in 5:
-		_add("butterfly", randf_range(3.0, 40.0), {"col": _pick(_BFLY_COLS), "ph": randf() * TAU, "par": randf_range(1.05, 1.3)})
 	for i in 3:
-		_add("birdflock", randf_range(20.0, 90.0), {"n": randi_range(3, 6), "dir": _dir(), "spd": randf_range(22.0, 42.0), "par": randf_range(0.7, 1.0)})
-	for i in 4:
-		_add("balloon", randf_range(30.0, 175.0), {"col": _pick(_BAL_COLS), "rise": randf_range(4.0, 9.0), "ph": randf() * TAU, "par": randf_range(0.85, 1.15)})
-	if randf() < 0.85:
-		_add("plane", randf_range(45.0, 110.0), {"dir": _dir(), "spd": randf_range(45.0, 75.0), "par": randf_range(0.6, 0.8)})
+		_add("butterfly", randf_range(3.0, 40.0), {"col": _pick(_BFLY_COLS), "ph": randf() * TAU, "par": randf_range(1.05, 1.3)})
 	for i in 2:
-		_add("satellite", randf_range(85.0, 180.0), {"dir": _dir(), "spd": randf_range(18.0, 30.0), "par": 0.85})
+		_add("birdflock", randf_range(30.0, 110.0), {"n": randi_range(3, 5), "dir": _dir(), "spd": randf_range(22.0, 42.0), "par": randf_range(0.7, 1.0)})
+	for i in 2:
+		_add("balloon", randf_range(60.0, 260.0), {"col": _pick(_BAL_COLS), "rise": randf_range(4.0, 9.0), "ph": randf() * TAU, "par": randf_range(0.85, 1.15)})
+	if randf() < 0.8:
+		_add("plane", randf_range(90.0, 170.0), {"dir": _dir(), "spd": randf_range(45.0, 75.0), "par": randf_range(0.6, 0.8)})
+	_add("satellite", randf_range(170.0, 280.0), {"dir": _dir(), "spd": randf_range(18.0, 30.0), "par": 0.85})
 	if randf() < 0.7:
-		_add("iss", randf_range(115.0, 195.0), {"dir": _dir(), "spd": randf_range(10.0, 18.0), "par": 0.8})
+		_add("iss", randf_range(240.0, 340.0), {"dir": _dir(), "spd": randf_range(10.0, 18.0), "par": 0.8})
 	if randf() < 0.5:   # 우주인 — 희귀
-		_add("astronaut", randf_range(135.0, 220.0), {"ph": randf() * TAU, "par": 0.9})
-	if randf() < 0.75:  # 행성은 멀어서 오래 보이지만 그래도 고공에서만
-		_add("planet", randf_range(155.0, 260.0), {"col": _pick(_PLANET_COLS), "r": randf_range(60.0, 108.0), "ring": randf() < 0.5, "par": 0.42})
-	for i in 2:
-		_add("shootingstar", randf_range(150.0, 320.0), {"ph": randf() * TAU, "period": randf_range(5.0, 10.0), "dir": _dir(), "par": 0.7})
+		_add("astronaut", randf_range(300.0, 410.0), {"ph": randf() * TAU, "par": 0.9})
+	if randf() < 0.75:  # 행성 — 멀리, 아주 고공
+		_add("planet", randf_range(320.0, 470.0), {"col": _pick(_PLANET_COLS), "r": randf_range(60.0, 108.0), "ring": randf() < 0.5, "par": 0.42})
+	_add("shootingstar", randf_range(340.0, 540.0), {"ph": randf() * TAU, "period": randf_range(5.0, 10.0), "dir": _dir(), "par": 0.7})
 
 
 ## 테스트용: 모든 종류를 알려진 고도에 하나씩 강제 배치(스샷 검증).
 func force_all_env() -> void:
 	_env.clear()
-	_add("butterfly", 12.0, {"col": _BFLY_COLS[0], "ph": 0.0, "par": 1.2})
-	_add("birdflock", 45.0, {"n": 5, "dir": 1.0, "spd": 30.0, "par": 0.9})
-	_add("balloon", 66.0, {"col": _BAL_COLS[0], "rise": 0.0, "ph": 0.0, "par": 1.0})
-	_add("plane", 85.0, {"dir": 1.0, "spd": 0.0, "par": 0.7})
-	_add("satellite", 125.0, {"dir": 1.0, "spd": 0.0, "par": 0.85})
-	_add("iss", 132.0, {"dir": 1.0, "spd": 0.0, "par": 0.8})
-	_add("astronaut", 168.0, {"ph": 0.0, "par": 0.9})
-	_add("planet", 185.0, {"col": _PLANET_COLS[0], "r": 96.0, "ring": true, "par": 0.42})
-	_add("shootingstar", 190.0, {"ph": 0.0, "period": 6.0, "dir": 1.0, "par": 0.5})
+	_add("butterfly", 15.0, {"col": _BFLY_COLS[0], "ph": 0.0, "par": 1.2})
+	_add("birdflock", 60.0, {"n": 5, "dir": 1.0, "spd": 30.0, "par": 0.9})
+	_add("balloon", 120.0, {"col": _BAL_COLS[0], "rise": 0.0, "ph": 0.0, "par": 1.0})
+	_add("plane", 130.0, {"dir": 1.0, "spd": 0.0, "par": 0.7})
+	_add("satellite", 210.0, {"dir": 1.0, "spd": 0.0, "par": 0.85})
+	_add("iss", 250.0, {"dir": 1.0, "spd": 0.0, "par": 0.8})
+	_add("astronaut", 330.0, {"ph": 0.0, "par": 0.9})
+	_add("planet", 370.0, {"col": _PLANET_COLS[0], "r": 96.0, "ring": true, "par": 0.42})
+	_add("shootingstar", 380.0, {"ph": 0.0, "period": 6.0, "dir": 1.0, "par": 0.5})
 
 
 func _add(kind: String, alt: float, extra: Dictionary) -> void:
@@ -155,30 +150,21 @@ func _draw() -> void:
 		if e["kind"] in ["satellite", "iss", "astronaut", "shootingstar"]:
 			_draw_env(e)
 
-	# 해 (지상)
-	var sun_a := clampf((52.0 - meters) / 38.0, 0.0, 1.0)
+	# 해 (지상) — 오를수록 아래로, 구름대 전에 사라짐
+	var sun_a := clampf((90.0 - meters) / 55.0, 0.0, 1.0)
 	if sun_a > 0.0:
-		_draw_sun(Vector2(VW - 148.0, 200.0 + meters * 0.9), sun_a)
+		_draw_sun(Vector2(VW - 148.0, 200.0 + meters * 0.7), sun_a)
 
-	# 바람 스트릭
-	var ws := absf(wind)
-	if ws > 0.06:
-		var dir := signf(wind)
-		for st in _streaks:
-			var sy := _alt_to_y(float(st["alt"]), 1.0)
-			if sy < 0.0 or sy > VH:
-				continue
-			var x := fmod(float(st["x0"]) + t * dir * (200.0 + 500.0 * ws), VW + 200.0) - 100.0
-			draw_line(Vector2(x, sy), Vector2(x - dir * float(st["len"]), sy), Color(0.9, 0.94, 1.0, ws * 0.4), 2.0)
+	# (바람 시각화는 전경 wind_fx가 담당 — 하늘 배경엔 스트릭을 그리지 않는다)
 
-	# 구름 (좌우로도 흐른다)
+	# 구름 (좌우로 흐르고, 바람이 불면 그 방향으로 살짝 쏠린다)
 	for c in _clouds:
 		var cy := _alt_to_y(float(c["alt"]), float(c["par"]))
 		if cy < -240.0 or cy > VH + 240.0:
 			continue
 		var a := clampf((cy + 220.0) / 150.0, 0.0, 1.0) * clampf((VH + 220.0 - cy) / 150.0, 0.0, 1.0)
 		var cx := wrapf(float(c["x"]) + t * float(c["vx"]), -240.0, VW + 240.0) \
-			+ sin(t * 0.1 + float(c["alt"])) * 8.0 + wind * 40.0 * float(c["par"])
+			+ sin(t * 0.1 + float(c["alt"])) * 8.0 + wind * 16.0 * float(c["par"])
 		if c["kind"] == "cirrus":
 			_draw_cirrus(Vector2(cx, cy), float(c["scale"]), a)
 		else:
@@ -191,7 +177,7 @@ func _draw() -> void:
 
 
 func _draw_stars() -> void:
-	var star_a := clampf((meters - 100.0) / 45.0, 0.0, 1.0)
+	var star_a := clampf((meters - 220.0) / 60.0, 0.0, 1.0)
 	if star_a <= 0.0:
 		return
 	for s in _stars:
@@ -259,10 +245,12 @@ func _draw_cloud(pos: Vector2, sc: float, a: float) -> void:
 
 
 func _draw_cirrus(pos: Vector2, sc: float, a: float) -> void:
-	var col := Color(0.92, 0.95, 1.0, 0.42 * a)
-	for row in [-10.0, 0.0, 10.0]:
-		for k in range(-3, 4):
-			draw_circle(pos + Vector2(k * 34.0 * sc, row * sc + sin(k * 1.3 + pos.x * 0.01) * 4.0), 20.0 * sc, col)
+	# 부드럽고 옅은 권운 — 가로로 길게 늘어진 획 몇 개(겹치는 원 격자를 없애 눈부심 제거)
+	var col := Color(0.90, 0.94, 1.0, 0.14 * a)
+	for row in [-14.0, 0.0, 13.0]:
+		var y := pos.y + row * sc
+		var half := (120.0 + row) * sc
+		draw_line(Vector2(pos.x - half, y), Vector2(pos.x + half, y), col, 12.0 * sc)
 
 
 ## 나비 — 색 날개 두 쌍(펄럭임) + 몸통 + 더듬이

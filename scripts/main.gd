@@ -20,13 +20,13 @@ const TILT_DEADZONE := 0.06         # 이보다 작은 기울기는 무시(미�
 const FLOOR_PIVOT := Vector2(BASE_X, GROUND_TOP_Y)    # 바닥 회전 피벗(토대 중심 바닥)
 const METERS_PER_PX := 8.0 / BLOCK_SIZE.y            # 실제 높이 → 미터 환산(벽돌 1개 = 8m, 고공까지 도달 쉽게)
 const MILESTONE_M := 50                              # 이 미터마다 돌파 이펙트
-const WIND_LOW := 30                                 # 이 높이부터 바람 발생
-const WIND_HIGH := 220                               # 이 높이 위(성층권)는 무풍
+const WIND_LOW := 40                                 # 이 높이부터 바람 발생
+const WIND_HIGH := 260                               # 이 높이 위(성층권)는 무풍
 const WIND_ANGLE := 0.13                             # 최대 바람이 바닥을 미는 각도(rad)
 # (개발용) 관찰 카메라: 지면에서 우주까지 자유 스크롤로 하늘을 미리 본다.
 const INSPECT_ZOOM := 0.72                           # 관찰 시 줌(세로로 넓게 보임)
 const INSPECT_BASE_Y := GROUND_TOP_Y - 300.0         # pan=0일 때 카메라 중심(지면이 하단에 보임)
-const INSPECT_MIN_PAN_Y := -2050.0                   # 위로 스크롤 한계(≈ 최상단 콘텐츠 위 우주)
+const INSPECT_MIN_PAN_Y := -3950.0                   # 위로 스크롤 한계(≈ 최상단 콘텐츠 위 우주)
 const INSPECT_DRAG := 2.6                            # 관찰 드래그 가속(우주까지 빠르게)
 
 var state: int = State.SELECT
@@ -684,7 +684,7 @@ func _update_birds(delta: float) -> void:
 func _spawn_bird() -> void:
 	bird_timer = randf_range(7.0, 13.0)
 	var m := _meters()
-	if m < 8 or m > 140:           # 지면 근처·고공엔 (앉는) 새 없음
+	if m < 10 or m > 150:          # 지면 근처·고공엔 (앉는) 새 없음
 		return
 	var top := _top_block()
 	if top == null:
