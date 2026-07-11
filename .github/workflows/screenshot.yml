@@ -45,11 +45,11 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
           GALLIUM_DRIVER: "llvmpipe"
         run: |
-          xvfb-run -a --server-args="-screen 0 720x1280x24" \
-            ./godot --resolution 720x1280 --rendering-driver opengl3 \
-            --audio-driver Dummy res://test/Screenshot.tscn 2>&1 | tee shots.log
+          timeout 160 xvfb-run -a --server-args="-screen 0 720x1280x24" \
+            stdbuf -oL -eL ./godot --resolution 720x1280 --rendering-driver opengl3 \
+            --audio-driver Dummy res://test/Screenshot.tscn 2>&1 | tee shots.log || true
           echo "----- shots -----"
-          grep "\[SHOT\]" shots.log || true
+          grep -E "\[SHOT\]|\[BOOT\]|SCRIPT ERROR|Stack trace|error" shots.log || true
           ls -la shots || true
 
       - name: Publish to 'screenshots' branch

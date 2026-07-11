@@ -32,6 +32,7 @@ jobs:
 
       - name: Run headless stacking test
         run: |
-          ./godot --headless res://test/StackTest.tscn 2>&1 | tee physics_out.log
-          echo "----- extracted TEST lines -----"
-          grep "\[TEST\]" physics_out.log || true
+          # timeout + line-buffering so a hang still flushes logs and ends the step
+          timeout 70 stdbuf -oL -eL ./godot --headless res://test/StackTest.tscn 2>&1 | tee physics_out.log || true
+          echo "----- extracted TEST/BOOT/ERROR lines -----"
+          grep -E "\[TEST\]|\[BOOT\]|SCRIPT ERROR|Stack trace|error" physics_out.log || true
