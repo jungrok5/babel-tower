@@ -84,15 +84,16 @@ func _ready() -> void:
 	Motion._sway = 0.0
 	await _settle(80)                  # 다시 수평 → 안정화
 
-	# 더 쌓은 뒤 (개발용) 관찰 카메라: 지면에서 시작해 위로 스크롤 → 우주까지 하늘 미리보기
-	if int(main.state) == 1:
-		await _build(8)
-	await _settle(40)
+	# (개발용) 관찰 카메라: 신선한 안정 탑(READY)에서 지면→우주 자유 스크롤 시연
+	main._restart()
+	Motion._sway = 0.0
+	await _build(4)
+	await _settle(30)
 	main._toggle_inspect()             # inspect ON (지면에서 시작 + 안내 문구)
 	await _settle(55)
 	await _shot("04_inspect")          # 관찰 시작: 지면+탑 + 안내(미리보기 고도)
-	main.inspect_pan.y = -9900.0       # 위로 스크롤 → 우주 고도
-	await _settle(70)
+	main.inspect_pan.y = -9900.0       # 위로 스크롤 → 우주 고도(카메라가 위로 이동)
+	await _settle(80)
 	await _shot("04b_inspect_space")   # 우주까지 스크롤(어두운 하늘 + 별)
 	main._toggle_inspect()             # inspect OFF
 	await _settle(30)

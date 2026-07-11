@@ -848,7 +848,7 @@ func _draw() -> void:
 func _update_camera(delta: float) -> void:
 	var target: Vector2
 	var z: float
-	if inspect and state == State.READY:
+	if inspect:
 		# (개발용) 관찰: 지면(하단)에서 시작해 드래그로 자유롭게 위로 스크롤 → 우주까지 하늘 미리보기
 		z = INSPECT_ZOOM
 		target = Vector2(BASE_X, INSPECT_BASE_Y) + inspect_pan
