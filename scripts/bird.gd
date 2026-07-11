@@ -36,7 +36,7 @@ func setup(block: Block, from_left: bool) -> void:
 
 func _anchor() -> Vector2:
 	if is_instance_valid(target_block):
-		return target_block.global_position + Vector2(0, -target_block.block_size.y * 0.5)
+		return target_block.global_position + Vector2(0, -target_block.bbox.y * 0.5)
 	return position
 
 
@@ -47,8 +47,8 @@ func _roam_pick() -> Vector2:
 func _perch_point() -> Vector2:
 	if is_instance_valid(target_block):
 		return target_block.global_position + Vector2(
-			_side * target_block.block_size.x * 0.30,
-			-target_block.block_size.y * 0.5 - 7.0)   # 블록 윗면에 앉음
+			_side * target_block.bbox.x * 0.30,
+			-target_block.bbox.y * 0.5 - 7.0)   # 블록 윗면에 앉음
 	return position
 
 

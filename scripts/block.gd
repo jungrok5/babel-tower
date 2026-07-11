@@ -1,48 +1,66 @@
 extends RigidBody2D
 class_name Block
-## 탑을 이루는 벽돌 한 장.
+## 탑을 이루는 물품 하나(벽돌·상자·책상·의자·공 등).
+## 타입 정의(parts)에 따라 여러 충돌 형태가 합쳐진 물리 강체가 된다.
 ## 물리 강체이지만, 기기가 "정지" 상태이면 마찰로 안정적으로 쌓인다.
-## 흔들리는 순간 상단 벽돌부터 회전하며 무너진다.
 
 signal landed                       ## 처음 무언가에 닿는 순간(=착지) 발생
 
-var block_size: Vector2 = Vector2(180.0, 62.0)
-var block_color: Color = Color(0.82, 0.76, 0.62)
+var type_def: Dictionary = {}
+var bbox: Vector2 = Vector2(180.0, 62.0)      ## 회전/높이 계산용 대략 경계 크기
+var tint: Color = Color(0.82, 0.76, 0.62)     ## 먼지 등에 쓰는 대표 색
+var _friction: float = 0.42
 var _landed := false
 
 
-func setup(size: Vector2, color: Color) -> void:
-	block_size = size
-	block_color = color
+func setup(t: Dictionary) -> void:
+	type_def = t
+	bbox = t.get("bbox", Vector2(180.0, 62.0))
+	_friction = t.get("friction", 0.42)
+	var parts: Array = t.get("parts", [])
+	if parts.size() > 0:
+		tint = parts[0]["color"]
+
+
+func has_landed() -> bool:
+	return _landed
 
 
 func _ready() -> void:
-	var shape := RectangleShape2D.new()
-	shape.size = block_size
-	var cs := CollisionShape2D.new()
-	cs.shape = shape
-	add_child(cs)
+	# 타입의 각 파트를 충돌 형태로 추가(합성 콜라이더)
+	for p in type_def.get("parts", []):
+		var cs := CollisionShape2D.new()
+		if p["kind"] == "rect":
+			var rect: Rect2 = p["rect"]
+			var rshape := RectangleShape2D.new()
+			rshape.size = rect.size
+			cs.shape = rshape
+			cs.position = rect.position + rect.size * 0.5
+		else:
+			var cshape := CircleShape2D.new()
+			cshape.radius = p["r"]
+			cs.shape = cshape
+			cs.position = p["pos"]
+		add_child(cs)
 
 	var mat := PhysicsMaterial.new()
 	# 마찰: 너무 높으면 바닥에 딱 붙어 통째로 기울기만 하고 안 넘어진다.
-	# 낮춰서 경사에서 상단 블록이 실제로 넘어가게(수평에선 미끄러지지 않음).
-	mat.friction = 0.42
+	mat.friction = _friction
 	mat.bounce = 0.0
 	physics_material_override = mat
 
 	mass = 2.0
-	# 댐핑으로 미세 진동을 가라앉혀 '묵직한 돌' 느낌을 준다.
+	# 댐핑으로 미세 진동을 가라앉혀 '묵직한' 느낌을 준다.
 	linear_damp = 0.7
 	angular_damp = 1.4
-	# 엔진 중력을 쓴다(방향은 main의 Area2D가 기울기만큼 회전).
-	# can_sleep=true → 가만히 있으면 잠들어 물리가 손대지 않는다(떨림 제거).
+	# 엔진 중력 사용, 가만히 있으면 잠들어(sleep) 떨림 제거.
 	gravity_scale = 1.0
 	can_sleep = true
-	# 빠르게 떨어질 때 벽돌이 서로를 뚫고 지나가는 것 방지
+	# 빠르게 떨어질 때 서로 뚫는 것 방지
 	continuous_cd = RigidBody2D.CCD_MODE_CAST_SHAPE
-	# 착지 감지용 접촉 모니터
+	# 착지 감지
 	contact_monitor = true
-	max_contacts_reported = 4
+	max_contacts_reported = 6
 	body_entered.connect(_on_body_entered)
 	queue_redraw()
 
@@ -56,10 +74,10 @@ func _on_body_entered(_body: Node) -> void:
 	landed.emit()
 
 
-## 착지 먼지 파티클 (타격감) — 블록 좌우 양끝(블록끼리 만나는 지점)에서 뿜는다
+## 착지 먼지 파티클 — 블록 좌우 양끝에서 뿜는다(타격감)
 func _spawn_dust() -> void:
 	for sx in [-1.0, 1.0]:
-		_dust_at(Vector2(sx * block_size.x * 0.5, block_size.y * 0.5), sx)
+		_dust_at(Vector2(sx * bbox.x * 0.5, bbox.y * 0.5), sx)
 
 
 func _dust_at(pos: Vector2, sx: float) -> void:
@@ -77,7 +95,7 @@ func _dust_at(pos: Vector2, sx: float) -> void:
 	p.initial_velocity_max = 190.0
 	p.scale_amount_min = 2.0
 	p.scale_amount_max = 5.0
-	p.color = block_color.lightened(0.12)
+	p.color = tint.lightened(0.12)
 	add_child(p)
 	get_tree().create_timer(1.2).timeout.connect(p.queue_free)
 
@@ -90,11 +108,4 @@ func _flash() -> void:
 
 
 func _draw() -> void:
-	var r := Rect2(-block_size * 0.5, block_size)
-	draw_rect(r, block_color)
-	draw_rect(r, block_color.darkened(0.4), false, 3.0)
-	# 상단 하이라이트 — 돌의 질감
-	draw_line(
-		Vector2(-block_size.x * 0.5 + 5.0, -block_size.y * 0.5 + 4.0),
-		Vector2(block_size.x * 0.5 - 5.0, -block_size.y * 0.5 + 4.0),
-		block_color.lightened(0.22), 2.0)
+	BlockTypes.draw_parts(self, type_def, 1.0)

@@ -10,6 +10,8 @@ var main: Node
 func _ready() -> void:
 	main = load("res://scenes/Main.tscn").instantiate()
 	add_child(main)
+	await get_tree().physics_frame
+	main._choose_type("brick")            # 선택 화면 건너뛰고 벽돌로 시작
 	var t := 0
 	while int(main.state) != 1 and t < 800:
 		await get_tree().physics_frame
@@ -52,7 +54,7 @@ func _min_block_y() -> float:
 	var m := -1e9
 	for b in main.blocks:
 		if is_instance_valid(b):
-			m = maxf(m, b.global_position.y + b.block_size.y * 0.5)
+			m = maxf(m, b.global_position.y + b.bbox.y * 0.5)
 	return m
 
 

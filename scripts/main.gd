@@ -4,32 +4,30 @@ extends Node2D
 ## 핵심 규칙: 기기를 최대한 움직이지 마라.
 ## 흔들리면 탑이 요동치고, 높이 올라갈수록 작은 떨림도 치명적이 된다.
 
-enum State { CALIB, READY, OVER }
+enum State { CALIB, READY, OVER, SELECT }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v3.0 · touch"
+const GAME_VERSION := "v3.1 · items"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
-const BLOCK_SIZE := Vector2(180.0, 62.0)
-const BLOCK_LEN_MIN := 90.0         # 두 손가락 드래그로 줄일 수 있는 최소 길이
-const BLOCK_LEN_MAX := 320.0        # 늘릴 수 있는 최대 길이
-const DROP_HEIGHT := 150.0          # 다음 벽돌이 떨어지기 시작하는 높이(짧게 = 연사 쌓기 쾌감)
-const TIP_ANGLE := 0.5              # 블록이 이 각도 이상 기울면 붕괴 (~28°)
-const COLLAPSE_FALL := 170.0        # 바닥 아래로 이만큼 떨어지면 붕괴
+const BLOCK_SIZE := Vector2(180.0, 62.0)             # 토대(초석) 크기 · 기준 단위
+const DROP_HEIGHT := 150.0          # 다음 블록이 떨어지기 시작하는 높이(짧게 = 연사 쌓기 쾌감)
 const MAX_TILT_ANGLE := 0.52        # 최대 기울임에서 바닥(판자)이 기우는 각도(라디안 ~30°)
 const FOUNDATION_TOP := GROUND_TOP_Y - BLOCK_SIZE.y   # 토대 윗면 Y (수평일 때)
 const TILT_DEADZONE := 0.06         # 이보다 작은 기울기는 무시(미세 손떨림 → 떨림 방지)
 const FLOOR_PIVOT := Vector2(BASE_X, GROUND_TOP_Y)    # 바닥 회전 피벗(토대 중심 바닥)
-const METERS_PER_BLOCK := 5                          # 블록 1개 = 몇 미터
+const METERS_PER_PX := 5.0 / BLOCK_SIZE.y            # 실제 높이 → 미터 환산(벽돌 1개 높이 = 5m)
 const MILESTONE_M := 50                              # 이 미터마다 돌파 이펙트
 const WIND_LOW := 120                                # 이 높이부터 바람 발생
 const WIND_HIGH := 600                               # 이 높이 위(성층권)는 무풍
 const WIND_ANGLE := 0.13                             # 최대 바람이 바닥을 미는 각도(rad)
 
-var state: int = State.CALIB
+var state: int = State.SELECT
 var score: int = 0
 var blocks: Array[Block] = []
+var current_type: Dictionary = {}   # 선택한 블록 타입(벽돌/상자/책상/의자/공)
+var peak_px: float = 0.0            # 이번 판에서 도달한 최고 실제 높이(px)
 var calib_timer: float = 0.0
 var go_shake: float = 0.0           # 붕괴 순간의 카메라 흔들림 버스트
 var web_permission_asked := false
@@ -37,12 +35,10 @@ var floor_body: AnimatableBody2D    # 센서에 따라 좌우로 움직이는 �
 var aiming := false                 # 손을 대고 위치를 조준 중인가
 var aim_x := BASE_X                 # 떨어뜨릴 가로 위치(월드 좌표)
 var aim_rot := 0.0                  # 놓을 블록의 회전(두 손가락 탭으로 90°씩)
-var aim_len := BLOCK_SIZE.x         # 놓을 블록의 길이(두 손가락 드래그로 조절)
 var drag_start_world := 0.0         # 드래그 시작 지점(상대 이동 기준)
-var mod_index := -1                 # 두 번째 손가락(회전/길이)의 터치 인덱스
+var mod_index := -1                 # 두 번째 손가락(회전)의 터치 인덱스
 var mod_start := Vector2.ZERO       # 두 번째 손가락이 처음 닿은 화면 좌표
-var mod_moved := false              # 두 번째 손가락이 드래그됐는가(=길이조절)
-var mod_base_len := 0.0             # 드래그 시작 시점의 길이
+var mod_moved := false              # 두 번째 손가락이 드래그됐는가(드래그면 회전 안 함)
 var gyro_locked := false            # (개발용) 자이로 잠금 — 바닥을 수평 고정
 var show_guides := false            # 안정도바·중심선 표시 (기본 숨김)
 var last_milestone := 0             # 마지막으로 돌파한 미터 구간
@@ -70,6 +66,7 @@ var stab_fill: ColorRect
 var guides_group: Control
 var guide_btn: Button
 var gyro_btn: Button
+var select_panel: Control
 var calib_panel: Control
 var calib_label: Label
 var calib_button: Button
@@ -81,11 +78,12 @@ var ui_font: Font
 
 func _ready() -> void:
 	randomize()
+	current_type = BlockTypes.get_type("brick")   # 선택 전 기본값
 	_build_environment()
 	_build_world()
 	_build_ui()
 	_build_audio()
-	_begin_calibration()
+	_begin_selection()
 
 
 func _build_environment() -> void:
@@ -192,6 +190,21 @@ func _brick_color(level: int) -> Color:
 
 # ---------------------------------------------------------------- 게임 흐름
 
+## 시작: 무엇을 쌓을지(블록 타입) 고르는 화면
+func _begin_selection() -> void:
+	state = State.SELECT
+	select_panel.visible = true
+	calib_panel.visible = false
+	over_panel.visible = false
+
+
+## 블록 타입 선택 → 보정으로 진행
+func _choose_type(id: String) -> void:
+	current_type = BlockTypes.get_type(id)
+	select_panel.visible = false
+	_begin_calibration()
+
+
 func _begin_calibration() -> void:
 	state = State.CALIB
 	calib_panel.visible = true
@@ -219,13 +232,13 @@ func _on_sensor_enable() -> void:
 	_start_calibration_countdown()
 
 
-## 지정한 가로 위치(at_x) 위에서 벽돌을 떨어뜨린다. 이 블록이 닿기 전엔 다음 블록을 못 놓는다.
-## 현재 선택된 회전(aim_rot)·길이(aim_len)를 반영해 생성한다.
+## 지정한 가로 위치(at_x) 위에서 선택한 타입의 블록을 떨어뜨린다.
+## 이 블록이 닿기 전엔 다음 블록을 못 놓는다. 현재 회전(aim_rot)을 반영한다.
 func _drop_block(at_x: float = BASE_X) -> void:
 	# 세로는 항상 탑 꼭대기 위에서 낙하 (가로는 손 뗀 위치)
 	var sy := _tower_top_edge() - _aim_half_h() - DROP_HEIGHT
 	var b := Block.new()
-	b.setup(Vector2(aim_len, BLOCK_SIZE.y), _brick_color(score + 1))
+	b.setup(current_type)
 	b.position = Vector2(at_x, sy)
 	b.rotation = aim_rot
 	b.landed.connect(_on_block_landed)
@@ -234,12 +247,18 @@ func _drop_block(at_x: float = BASE_X) -> void:
 	settling = b            # 이 블록이 바닥/탑에 닿기 전까지 다음 블록을 놓을 수 없다
 	settle_time = 0.0
 	score += 1
-	_check_progress()
 
 
-## 회전·길이를 반영한 블록의 수직 반높이(낙하 시작 높이 계산용)
+## 현재 블록 크기(bbox)와 회전을 반영한 수직 반높이(낙하 시작 높이 계산용)
 func _aim_half_h() -> float:
-	return 0.5 * (absf(aim_len * sin(aim_rot)) + absf(BLOCK_SIZE.y * cos(aim_rot)))
+	var bb: Vector2 = current_type.get("bbox", BLOCK_SIZE)
+	return 0.5 * (absf(bb.x * sin(aim_rot)) + absf(bb.y * cos(aim_rot)))
+
+
+## 회전을 반영한 블록의 실제 윗변 y
+func _block_top_y(b: Block) -> float:
+	var ext := 0.5 * (absf(b.bbox.x * sin(b.rotation)) + absf(b.bbox.y * cos(b.rotation)))
+	return b.position.y - ext
 
 
 ## 놓을 블록을 90° 회전 (두 손가락 탭)
@@ -260,16 +279,28 @@ func _can_drop() -> bool:
 	return settling == null or not is_instance_valid(settling)
 
 
+## 안착된 탑의 실제 높이(px) — 낙하 중(미착지)인 블록은 제외
+func _height_px() -> float:
+	return maxf(0.0, FOUNDATION_TOP - _tower_top_edge())
+
+
+## 현재 실제 높이(미터)
 func _meters() -> int:
-	return score * METERS_PER_BLOCK
+	return int(round(_height_px() * METERS_PER_PX))
 
 
-## 블록이 바닥/탑에 닿는 순간 — 타격감(작은 카메라 킥 + 햅틱). 먼지는 블록이 직접 뿜는다.
+## 이번 판 최고 도달 높이(미터)
+func _peak_meters() -> int:
+	return int(round(peak_px * METERS_PER_PX))
+
+
+## 블록이 바닥/탑에 닿는 순간 — 타격감 + 진행 체크(높이 갱신 반영).
 func _on_block_landed() -> void:
 	settling = null                     # 닿았다 → 다음 블록 허용
 	go_shake = maxf(go_shake, 5.0)
 	Input.vibrate_handheld(12)
 	_play("place", 0.14)
+	_check_progress()
 
 
 ## 높이 미터 구간 돌파 / 최고 기록 갱신 시 이펙트
@@ -281,7 +312,8 @@ func _check_progress() -> void:
 		go_shake = maxf(go_shake, 9.0)
 		Input.vibrate_handheld(35)
 		_play("milestone")
-	if not record_broken and Graveyard.best > 0 and score > Graveyard.best:
+	var best := Graveyard.best_for(current_type.get("id", "brick"))
+	if not record_broken and best > 0 and _peak_meters() > best:
 		record_broken = true
 		_popup("최고 기록 갱신!", Color(1.0, 0.82, 0.25))
 		go_shake = maxf(go_shake, 15.0)
@@ -333,7 +365,7 @@ func _game_over() -> void:
 	bird = null
 	_play("collapse")
 	Input.vibrate_handheld(400)         # 붕괴의 햅틱
-	Graveyard.add_record(score)
+	Graveyard.add_record(current_type.get("id", "brick"), _peak_meters())
 	# 붕괴 장면(줌아웃)을 잠깐 보여준 뒤 결과 화면을 띄운다
 	await get_tree().create_timer(1.7).timeout
 	if state == State.OVER:             # 그 사이 재시작하지 않았다면
@@ -346,11 +378,11 @@ func _restart() -> void:
 			b.queue_free()
 	blocks.clear()
 	score = 0
+	peak_px = 0.0
 	aiming = false
 	settling = null
 	aim_x = BASE_X
 	aim_rot = 0.0
-	aim_len = BLOCK_SIZE.x
 	mod_index = -1
 	last_milestone = 0
 	record_broken = false
@@ -378,7 +410,7 @@ func _restart() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	# 어디를 눌러도 벽돌은 '중앙'에서 시작. 누른 지점 기준으로 좌우로 끌면 그만큼 이동,
 	# 떼면 낙하. (터치는 emulate_mouse_from_touch로 마우스 이벤트가 된다)
-	# 키보드(개발/데스크톱): Space=낙하, R=회전, [ ]=길이, G=자이로 잠금
+	# 키보드(개발/데스크톱): Space=낙하, R=회전, G=자이로 잠금
 	if event is InputEventKey:
 		if event.pressed and not event.echo:
 			match event.keycode:
@@ -388,10 +420,6 @@ func _unhandled_input(event: InputEvent) -> void:
 				KEY_R:
 					if state == State.READY:
 						_rotate_block()
-				KEY_BRACKETLEFT:
-					aim_len = clampf(aim_len - 20.0, BLOCK_LEN_MIN, BLOCK_LEN_MAX)
-				KEY_BRACKETRIGHT:
-					aim_len = clampf(aim_len + 20.0, BLOCK_LEN_MIN, BLOCK_LEN_MAX)
 				KEY_G:
 					_toggle_gyro_lock()
 		return
@@ -403,8 +431,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				aiming = true
 				drag_start_world = _screen_to_world_x(event.position)
 				aim_x = BASE_X                     # 무조건 중앙에서 시작
-				aim_rot = 0.0                      # 블록마다 회전/길이는 초기화
-				aim_len = BLOCK_SIZE.x
+				aim_rot = 0.0                      # 블록마다 회전은 초기화
 				mod_index = -1
 		else:  # 손을 뗌 → 그 위치에 낙하
 			if aiming and state == State.READY:
@@ -422,24 +449,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		_rotate_block()
 		return
 
-	# 두 번째 손가락: 탭 = 90° 회전, 드래그 = 길이조절
+	# 두 번째 손가락 탭 = 90° 회전 (크게 드래그하면 오탭으로 보고 회전 안 함)
 	if event is InputEventScreenTouch and event.index >= 1:
 		if event.pressed:
 			if aiming and mod_index == -1:
 				mod_index = event.index
 				mod_start = event.position
 				mod_moved = false
-				mod_base_len = aim_len
 		elif event.index == mod_index:
-			if not mod_moved:                      # 움직이지 않았으면 탭 → 회전
+			if not mod_moved:
 				_rotate_block()
 			mod_index = -1
 		return
 	if event is InputEventScreenDrag and event.index == mod_index:
-		if event.position.distance_to(mod_start) > 12.0:
+		if event.position.distance_to(mod_start) > 24.0:
 			mod_moved = true
-		aim_len = clampf(mod_base_len + (event.position.x - mod_start.x) * 1.5,
-			BLOCK_LEN_MIN, BLOCK_LEN_MAX)
 		return
 
 
@@ -468,9 +492,10 @@ func _physics_process(delta: float) -> void:
 	if is_instance_valid(floor_body):
 		floor_body.rotation = lerpf(floor_body.rotation, target_angle, 0.15)
 
-	if state == State.CALIB or state == State.OVER:
+	if state != State.READY:
 		return
 
+	peak_px = maxf(peak_px, _height_px())
 	_update_birds(delta)
 	_check_collapse()
 
@@ -552,16 +577,27 @@ func _check_collapse() -> void:
 	for b in blocks:
 		if not is_instance_valid(b):
 			continue
-		if b.global_position.y + b.block_size.y * 0.5 > GROUND_TOP_Y - 6.0:
+		var ext := 0.5 * (absf(b.bbox.x * sin(b.rotation)) + absf(b.bbox.y * cos(b.rotation)))
+		if b.position.y + ext > GROUND_TOP_Y - 6.0:
 			_game_over()
 			return
 
 
+## 안착된 블록들의 최상단 y (낙하 중인 블록은 제외 → 높이가 튀지 않게)
 func _tower_top_edge() -> float:
 	var top := FOUNDATION_TOP   # 블록이 없으면 토대 윗면
 	for b in blocks:
+		if is_instance_valid(b) and b.has_landed():
+			top = minf(top, _block_top_y(b))
+	return top
+
+
+## 모든 블록(흩어진 것 포함)의 최상단 y — 붕괴 줌아웃 프레이밍용
+func _lowest_top() -> float:
+	var top := FOUNDATION_TOP
+	for b in blocks:
 		if is_instance_valid(b):
-			top = minf(top, b.position.y - b.block_size.y * 0.5)
+			top = minf(top, _block_top_y(b))
 	return top
 
 
@@ -591,13 +627,14 @@ func _draw() -> void:
 		return
 	var top_edge := _tower_top_edge()
 
-	# 최고 기록 라인 (목표) — 이 선을 넘으면 기록 갱신 이펙트
-	if Graveyard.best > 0:
-		var ry := FOUNDATION_TOP - float(Graveyard.best) * BLOCK_SIZE.y
+	# 최고 기록 라인 (해당 블록 타입의 최고 높이) — 이 선을 넘으면 기록 갱신 이펙트
+	var best_m := Graveyard.best_for(current_type.get("id", "brick"))
+	if best_m > 0:
+		var ry := FOUNDATION_TOP - float(best_m) / METERS_PER_PX
 		draw_dashed_line(Vector2(BASE_X - 420, ry), Vector2(BASE_X + 420, ry),
 			Color(1.0, 0.82, 0.3, 0.5), 3.0, 22.0)
 		if ui_font:
-			draw_string(ui_font, Vector2(BASE_X - 400, ry - 14), "최고 기록",
+			draw_string(ui_font, Vector2(BASE_X - 400, ry - 14), "최고 기록 %d m" % best_m,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.82, 0.3, 0.7))
 
 	# 중심(원위치) 세로 기준선 — 가이드 켤 때만
@@ -607,19 +644,21 @@ func _draw() -> void:
 			Vector2(BASE_X, GROUND_TOP_Y + 40.0),
 			Color(0.55, 0.6, 0.75, 0.28), 2.0, 14.0)
 
-	# 2) 조준 중일 때만: 회전/길이를 반영한 고스트 칸 + 바닥까지 내려가는 낙하 컬럼
+	# 2) 조준 중일 때만: 회전을 반영한 실제 블록 모양 고스트 + 바닥까지 내려가는 낙하 컬럼
 	if aiming:
 		var half_h := _aim_half_h()
 		var center := Vector2(aim_x, top_edge - half_h - DROP_HEIGHT)
-		var hw := aim_len * 0.5
-		var hh := BLOCK_SIZE.y * 0.5
-		var pts := PackedVector2Array()
-		for corner in [Vector2(-hw, -hh), Vector2(hw, -hh), Vector2(hw, hh), Vector2(-hw, hh)]:
-			pts.append(center + corner.rotated(aim_rot))
-		draw_colored_polygon(pts, Color(0.96, 0.9, 0.6, 0.16))              # 반투명 채움
-		var outline := pts
-		outline.append(pts[0])
-		draw_polyline(outline, Color(0.98, 0.92, 0.55, 0.85), 3.0)          # 테두리
+		var fill := Color(0.98, 0.92, 0.55, 0.18)
+		var edge := Color(0.98, 0.92, 0.55, 0.75)
+		draw_set_transform(center, aim_rot, Vector2.ONE)
+		for p in current_type.get("parts", []):
+			if p["kind"] == "rect":
+				draw_rect(p["rect"], fill)
+				draw_rect(p["rect"], edge, false, 2.5)
+			else:
+				draw_circle(p["pos"], p["r"], fill)
+				draw_circle(p["pos"], p["r"], edge, false, 2.5)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		draw_dashed_line(
 			Vector2(aim_x, center.y + half_h),
 			Vector2(aim_x, GROUND_TOP_Y),
@@ -631,12 +670,12 @@ func _update_camera(delta: float) -> void:
 	var z: float
 	if state == State.OVER:
 		# 붕괴 시: 지면~꼭대기 전체가 보이도록 줌아웃 (무너지는 걸 다 볼 수 있게)
-		var tower_top_y := GROUND_TOP_Y - float(score) * BLOCK_SIZE.y
+		var tower_top_y := minf(_lowest_top(), GROUND_TOP_Y - 200.0)
 		var mid_y := (GROUND_TOP_Y + tower_top_y) * 0.5
 		var needed := (GROUND_TOP_Y - tower_top_y) + 700.0   # 여백 포함 높이
 		z = clampf(1280.0 / needed, 0.16, 1.0)
 		target = Vector2(BASE_X, mid_y)
-	elif state == State.CALIB:
+	elif state == State.CALIB or state == State.SELECT:
 		target = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
 		z = 1.0
 	else:
@@ -655,7 +694,7 @@ func _update_camera(delta: float) -> void:
 
 func _update_ui(delta: float) -> void:
 	height_label.text = "%d m" % _meters()
-	best_label.text = "최고 %d m" % (maxi(Graveyard.best, score) * METERS_PER_BLOCK)
+	best_label.text = "최고 %d m" % maxi(Graveyard.best_for(current_type.get("id", "brick")), _peak_meters())
 
 	if show_guides:
 		# 안정도 = 얼마나 수평인가. 기울일수록 빨갛게.
@@ -675,8 +714,10 @@ func _update_ui(delta: float) -> void:
 					state = State.READY
 				calib_label.text = "가장 편안한 자세로\n기기를 잡으세요\n\n· 보정 중 ·"
 		State.READY:
-			hint_label.text = "끌어서 위치 · 두 손가락 탭=회전 · 두 손가락 드래그=길이\n기기를 수평으로 — 기울이면 바닥이 움직여 탑이 쏠립니다"
+			hint_label.text = "끌어서 위치 정하고 떼면 낙하 · 두 손가락 탭 = 90° 회전\n기기를 수평으로 — 기울이면 바닥이 움직여 탑이 쏠립니다"
 		State.OVER:
+			hint_label.text = ""
+		State.SELECT:
 			hint_label.text = ""
 
 
@@ -756,8 +797,54 @@ func _build_ui() -> void:
 	ver.position = Vector2(20, 1234)
 	ui.add_child(ver)
 
+	_build_select_panel()
 	_build_calib_panel()
 	_build_over_panel()
+
+
+## 블록 선택 화면 — 실생활 물품 타일 중 하나를 골라 시작
+func _build_select_panel() -> void:
+	select_panel = _make_overlay(Color(0.04, 0.05, 0.08, 0.97))
+	select_panel.mouse_filter = Control.MOUSE_FILTER_STOP    # 뒤 입력 차단
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	select_panel.add_child(center)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 26)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	center.add_child(box)
+	box.add_child(_centered(_make_label("무엇을 쌓을까요?", 50, Color(0.95, 0.92, 0.82))))
+	box.add_child(_centered(_make_label(
+		"블록마다 난이도와 최고 기록이 따로 관리됩니다", 26, Color(0.6, 0.63, 0.72))))
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 22)
+	grid.add_theme_constant_override("v_separation", 22)
+	box.add_child(_centered(grid))
+	for t in BlockTypes.all():
+		grid.add_child(_make_type_tile(t))
+	ui.add_child(select_panel)
+
+
+## 선택 타일: 위에 미니 미리보기, 아래 이름. 누르면 그 타입으로 시작.
+func _make_type_tile(t: Dictionary) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(212, 172)
+	b.focus_mode = Control.FOCUS_NONE
+	b.pressed.connect(_choose_type.bind(t["id"]))
+	var icon := load("res://scripts/type_icon.gd").new()
+	icon.type_def = t
+	icon.position = Vector2(46, 14)
+	icon.size = Vector2(120, 112)
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(icon)
+	var lb := _make_label(t["name"], 30, Color(0.93, 0.9, 0.82))
+	lb.position = Vector2(0, 126)
+	lb.size = Vector2(212, 40)
+	lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(lb)
+	return b
 
 
 func _build_calib_panel() -> void:
@@ -804,21 +891,23 @@ func _show_game_over() -> void:
 	for c in over_body.get_children():
 		c.queue_free()
 
+	var tid: String = current_type.get("id", "brick")
+	var tname: String = current_type.get("name", "블록")
 	over_body.add_child(_centered(_make_label("붕괴", 72, Color(0.9, 0.35, 0.32))))
 	over_body.add_child(_centered(_make_label(
 		"당신도 수많은 욕망의\n잔해 중 하나가 되었습니다.", 34, Color(0.82, 0.8, 0.85))))
 	over_body.add_child(_spacer(10))
 	over_body.add_child(_centered(_make_label(
-		"이번 탑의 높이  %d" % score, 40, Color(0.95, 0.93, 0.8))))
+		"[%s] 이번 높이  %d m" % [tname, _peak_meters()], 40, Color(0.95, 0.93, 0.8))))
 	over_body.add_child(_centered(_make_label(
-		"최고 기록  %d" % Graveyard.best, 28, Color(0.6, 0.62, 0.7))))
+		"이 블록 최고 기록  %d m" % Graveyard.best_for(tid), 28, Color(0.6, 0.62, 0.7))))
 
-	# 역대 욕망의 잔해 무덤
-	var recent: Array = Graveyard.recent(6)
+	# 역대 욕망의 잔해 무덤 (이 블록 타입)
+	var recent: Array = Graveyard.recent(tid, 6)
 	if recent.size() > 0:
 		over_body.add_child(_spacer(12))
 		over_body.add_child(_centered(_make_label(
-			"— 역대 욕망의 잔해 —", 24, Color(0.5, 0.5, 0.58))))
+			"— 역대 %s 잔해 —" % tname, 24, Color(0.5, 0.5, 0.58))))
 		var line := ""
 		for h in recent:
 			line += "%d   " % int(h)
@@ -835,7 +924,24 @@ func _show_game_over() -> void:
 	retry.pressed.connect(_restart)
 	over_body.add_child(_centered(retry))
 
+	# 블록 바꾸기 — 선택 화면으로
+	var change := Button.new()
+	change.text = "블록 바꾸기"
+	if ui_font:
+		change.add_theme_font_override("font", ui_font)
+	change.add_theme_font_size_override("font_size", 30)
+	change.custom_minimum_size = Vector2(280, 72)
+	change.focus_mode = Control.FOCUS_NONE
+	change.pressed.connect(_restart_to_select)
+	over_body.add_child(_centered(change))
+
 	over_panel.visible = true
+
+
+## 붕괴 화면에서 '블록 바꾸기' → 판을 리셋하고 선택 화면으로
+func _restart_to_select() -> void:
+	_restart()
+	_begin_selection()
 
 
 # ---------------------------------------------------------------- UI 헬퍼

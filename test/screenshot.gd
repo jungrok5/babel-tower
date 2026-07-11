@@ -13,6 +13,12 @@ func _ready() -> void:
 	main = load("res://scenes/Main.tscn").instantiate()
 	add_child(main)
 
+	# 블록 선택 화면 (모든 타입 아이콘)
+	await _settle(10)
+	await _shot("00_select")
+
+	main._choose_type("brick")         # 벽돌로 시작
+
 	# READY(보정 완료)까지 대기
 	var t := 0
 	while int(main.state) != 1 and t < 800:
@@ -26,21 +32,16 @@ func _ready() -> void:
 	await _settle(40)
 	await _shot("02_stack")            # 몇 층 쌓인 모습
 
-	# 회전/길이 조절 블록 — 세운 기둥 + 넓은 블록 + 좁은 블록
+	# 회전 데모 — 세운 벽돌(기둥) 두 개
 	main.aim_rot = PI * 0.5
-	main._drop_block(main.BASE_X - 34.0)
+	main._drop_block(main.BASE_X - 30.0)
+	await _wait_land()
+	main.aim_rot = PI * 0.5
+	main._drop_block(main.BASE_X + 24.0)
 	await _wait_land()
 	main.aim_rot = 0.0
-	main.aim_len = 300.0
-	main._drop_block(main.BASE_X + 20.0)
-	await _wait_land()
-	main.aim_len = 110.0
-	main._drop_block(main.BASE_X)
-	await _wait_land()
-	main.aim_rot = 0.0
-	main.aim_len = main.BLOCK_SIZE.x
 	await _settle(30)
-	await _shot("03_shapes")           # 회전(기둥)·길이(넓게/좁게) 블록
+	await _shot("03_rotate")           # 90° 회전한 기둥 블록
 
 	# (개발용) 자이로 잠금 검증: 최대로 기울여도 바닥이 수평 유지
 	Motion.set_process(false)
@@ -83,6 +84,21 @@ func _ready() -> void:
 		g += 1
 	await _settle(90)                  # 카메라 줌아웃 대기
 	await _shot("08_collapse")         # 붕괴/줌아웃
+
+	# 다른 블록 타입 물리 시연 (자이로 잠금 상태로 깔끔히 쌓기)
+	main.gyro_locked = true
+	Motion._sway = 0.0
+	main._restart()
+	main.current_type = BlockTypes.get_type("desk")
+	await _build(4)
+	await _settle(70)
+	await _shot("09_desk")             # 책상(다리 있는 합성 콜라이더)
+
+	main._restart()
+	main.current_type = BlockTypes.get_type("ball")
+	await _build(4)
+	await _settle(80)
+	await _shot("10_ball")             # 공(원형, 잘 구름)
 
 	get_tree().quit()
 
