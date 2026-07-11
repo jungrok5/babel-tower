@@ -28,7 +28,14 @@ jobs:
           chmod +x godot
 
       - name: Import project
-        run: ./godot --headless --import . || true
+        run: |
+          ./godot --headless --import . 2>&1 | tee import.log || true
+          # 파싱 에러를 조용히 넘기지 않고 즉시 실패시킨다(예전엔 || true가 감췄다)
+          if grep -qE "Parse Error|Failed to load script" import.log; then
+            echo "::error::GDScript parse error during import"
+            grep -E "Parse Error|SCRIPT ERROR|Failed to load script" import.log || true
+            exit 1
+          fi
 
       - name: Run headless stacking test
         run: |
