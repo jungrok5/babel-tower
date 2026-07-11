@@ -1,85 +1,131 @@
 extends Control
-## 고도(미터)에 따라 스크롤하는 "실제 대기층" 배경.
-## CanvasLayer(화면 고정) 위에 그려지지만, 구름·별을 각자의 고도에 배치하고
-## 현재 고도만큼 아래로 밀어 그려서 — 올라갈수록 구름/별이 아래로 지나간다(패럴랙스).
+## 고도(미터)에 따라 스크롤하는 "살아있는 대기층" 배경.
+## 구름·별·환경요소(나비·새떼·풍선·비행기·위성·우주정거장·우주인·행성·UFO·별똥별)를
+## 각자의 고도에 배치하고, 현재 고도만큼 아래로 밀어 그린다(패럴랙스) → 올라갈수록 아래로 지나간다.
 ##
-## 실제 대기층 순서(아래→위):
-##   0~60m   : 맑음(구름 없음)          · (새는 main이 15m~ 띄움)
-##   70~170m : 높은 조각구름(드문드문)
-##   120~600m: 바람(스트릭)
-##   190~330m: 구름 가득(층운/적운)
-##   330~430m: 구름 위(맑음)
-##   440~660m: 성층권(얇은 권운)
-##   560m~   : 별이 보이기 시작
-##   820m~   : 우주(칠흑)
+## 대기층 순서(아래→위, 미터):
+##   0~15   맑음(나비)
+##   18~65  높은 조각구름 · 새떼
+##   20~250 바람
+##   35~95  구름 가득
+##   45~110 비행기
+##   95~110 구름 위 맑음
+##   80~180 위성
+##   105~150 성층권(권운)
+##   100~   별
+##   110~200 우주정거장 · 우주인 · UFO(희귀)
+##   150~   행성 · 별똥별 · 깊은 우주(칠흑)
 
-var meters: float = 0.0     # 현재 고도(미터) — main이 매 프레임 갱신
-var t: float = 0.0          # 흐른 시간 — 반짝임/미세 흐름용
-var wind: float = 0.0       # 현재 바람(-1..1) — 스트릭 방향/세기
+var meters: float = 0.0
+var t: float = 0.0
+var wind: float = 0.0
 
 const VW := 720.0
 const VH := 1280.0
-const REF_Y := VH * 0.52    # 고도==물체고도일 때 그 물체가 놓이는 화면 y(기준선)
-const PX_PER_M := 12.0      # 고도 1m당 배경이 내려가는 픽셀(패럴랙스 기본치)
+const REF_Y := VH * 0.5
+const PX_PER_M := 10.0        # 고도 1m당 배경이 내려가는 픽셀
+const OUTLINE := Color(0.12, 0.11, 0.14)
 
-# (미터, 위색, 아래색) — 맑은 대낮 → 파란 하늘 → 성층권 남색 → 우주 칠흑
+# (미터, 위색, 아래색) — 대낮 → 파랑 → 성층권 남색 → 우주 칠흑 (고도 낮춰 도달 쉽게)
 const SKY := [
 	[0.0,   Color(0.40, 0.68, 0.95), Color(0.74, 0.90, 0.99)],
-	[240.0, Color(0.22, 0.46, 0.82), Color(0.46, 0.68, 0.94)],
-	[470.0, Color(0.12, 0.20, 0.52), Color(0.24, 0.36, 0.66)],
-	[660.0, Color(0.05, 0.07, 0.24), Color(0.10, 0.13, 0.34)],
-	[850.0, Color(0.010, 0.012, 0.03), Color(0.02, 0.02, 0.06)],
+	[60.0,  Color(0.24, 0.48, 0.84), Color(0.48, 0.70, 0.95)],
+	[110.0, Color(0.12, 0.20, 0.52), Color(0.24, 0.36, 0.66)],
+	[150.0, Color(0.05, 0.07, 0.24), Color(0.10, 0.13, 0.34)],
+	[185.0, Color(0.010, 0.012, 0.03), Color(0.02, 0.02, 0.06)],
 ]
 
-# 구름 인스턴스: {alt(고도m), x(화면x), scale, par(패럴랙스계수), kind("puffy"|"cirrus")}
-var _clouds: Array = []
-# 별 인스턴스: {alt, x, size, ph(반짝임 위상), par}
-var _stars: Array = []
-# 바람 스트릭: {alt, len, x0}
-var _streaks: Array = []
+var _clouds: Array = []       # {alt,x,scale,par,kind,vx}
+var _stars: Array = []        # {alt,x,size,ph,par}
+var _streaks: Array = []      # {alt,len,x0}
+var _env: Array = []          # {kind,alt,x,par,...}
+
+const _BAL_COLS := [Color(0.92,0.28,0.28), Color(0.30,0.55,0.95), Color(0.98,0.80,0.25),
+	Color(0.42,0.78,0.42), Color(0.72,0.42,0.88), Color(0.98,0.55,0.25)]
+const _BFLY_COLS := [Color(0.98,0.55,0.20), Color(0.35,0.65,0.95), Color(0.95,0.45,0.70), Color(0.98,0.82,0.30)]
+const _PLANET_COLS := [Color(0.82,0.55,0.35), Color(0.60,0.66,0.82), Color(0.70,0.58,0.72)]
 
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_gen_sky()
+	regen_env()
 
-	# 구름 밴드: [고도min, 고도max, 개수, 종류] — 실제 대기층 밀도 프로파일
-	var bands := [
-		[70.0, 170.0, 6, "puffy"],     # 높은 조각구름(드문드문)
-		[190.0, 330.0, 20, "puffy"],   # 구름 가득(빽빽)
-		[440.0, 660.0, 8, "cirrus"],   # 성층권 얇은 권운
-	]
-	for b in bands:
+
+func _gen_sky() -> void:
+	# 구름 밴드: [고도min, 고도max, 개수, 종류]
+	for b in [[18.0, 65.0, 6, "puffy"], [35.0, 95.0, 20, "puffy"], [105.0, 150.0, 8, "cirrus"]]:
 		for i in int(b[2]):
-			_clouds.append({
-				"alt": randf_range(b[0], b[1]),
-				"x": randf() * VW,
-				"scale": randf_range(0.7, 1.5),
-				"par": randf_range(0.78, 1.16),
-				"kind": b[3],
-			})
-	_clouds.sort_custom(func(a, c): return float(a["par"]) < float(c["par"]))  # 먼 것 먼저(뒤에)
-
-	# 별: 고도 580~1400m에 넓게. 먼 배경이라 par 작게(천천히 흐름).
-	for i in 130:
-		_stars.append({
-			"alt": randf_range(580.0, 1400.0),
-			"x": randf() * VW,
-			"size": randf_range(1.0, 2.7),
-			"ph": randf() * TAU,
-			"par": randf_range(0.30, 0.52),
-		})
-
-	# 바람 스트릭: 바람 부는 고도대(120~600m)에 분포
+			_clouds.append({"alt": randf_range(b[0], b[1]), "x": randf() * VW,
+				"scale": randf_range(0.7, 1.5), "par": randf_range(0.78, 1.16),
+				"kind": b[3], "vx": randf_range(-16.0, 16.0)})
+	_clouds.sort_custom(func(a, c): return float(a["par"]) < float(c["par"]))
+	for i in 110:
+		_stars.append({"alt": randf_range(105.0, 380.0), "x": randf() * VW,
+			"size": randf_range(1.0, 2.7), "ph": randf() * TAU, "par": randf_range(0.30, 0.52)})
 	for i in 16:
-		_streaks.append({"alt": randf_range(120.0, 600.0), "len": randf_range(40.0, 120.0), "x0": randf() * VW})
+		_streaks.append({"alt": randf_range(20.0, 250.0), "len": randf_range(40.0, 120.0), "x0": randf() * VW})
+
+
+## 환경요소를 매 판마다 새로 뿌린다(랜덤 · 희귀 요소 포함) → "이번엔 뭐가 보일까"
+func regen_env() -> void:
+	_env.clear()
+	for i in 5:
+		_add("butterfly", randf_range(3.0, 40.0), {"col": _pick(_BFLY_COLS), "ph": randf() * TAU, "par": randf_range(1.05, 1.3)})
+	for i in 3:
+		_add("birdflock", randf_range(20.0, 90.0), {"n": randi_range(3, 6), "dir": _dir(), "spd": randf_range(22.0, 42.0), "par": randf_range(0.7, 1.0)})
+	for i in 4:
+		_add("balloon", randf_range(30.0, 175.0), {"col": _pick(_BAL_COLS), "rise": randf_range(4.0, 9.0), "ph": randf() * TAU, "par": randf_range(0.85, 1.15)})
+	if randf() < 0.85:
+		_add("plane", randf_range(45.0, 110.0), {"dir": _dir(), "spd": randf_range(45.0, 75.0), "par": randf_range(0.6, 0.8)})
+	for i in 2:
+		_add("satellite", randf_range(85.0, 180.0), {"dir": _dir(), "spd": randf_range(18.0, 30.0), "par": 0.5})
+	if randf() < 0.7:
+		_add("iss", randf_range(115.0, 195.0), {"dir": _dir(), "spd": randf_range(10.0, 18.0), "par": 0.5})
+	if randf() < 0.5:   # 우주인 — 희귀
+		_add("astronaut", randf_range(135.0, 220.0), {"ph": randf() * TAU, "par": 0.55})
+	if randf() < 0.75:
+		_add("planet", randf_range(155.0, 260.0), {"col": _pick(_PLANET_COLS), "r": randf_range(60.0, 108.0), "ring": randf() < 0.5, "par": 0.2})
+	if randf() < 0.22:  # UFO — 아주 희귀
+		_add("ufo", randf_range(120.0, 205.0), {"dir": _dir(), "spd": randf_range(28.0, 48.0), "par": 0.5})
+	for i in 2:
+		_add("shootingstar", randf_range(150.0, 320.0), {"ph": randf() * TAU, "period": randf_range(5.0, 10.0), "dir": _dir(), "par": 0.5})
+
+
+## 테스트용: 모든 종류를 알려진 고도에 하나씩 강제 배치(스샷 검증).
+func force_all_env() -> void:
+	_env.clear()
+	_add("butterfly", 12.0, {"col": _BFLY_COLS[0], "ph": 0.0, "par": 1.2})
+	_add("birdflock", 45.0, {"n": 5, "dir": 1.0, "spd": 30.0, "par": 0.9})
+	_add("balloon", 66.0, {"col": _BAL_COLS[0], "rise": 0.0, "ph": 0.0, "par": 1.0})
+	_add("plane", 85.0, {"dir": 1.0, "spd": 0.0, "par": 0.7})
+	_add("satellite", 125.0, {"dir": 1.0, "spd": 0.0, "par": 0.5})
+	_add("iss", 132.0, {"dir": 1.0, "spd": 0.0, "par": 0.5})
+	_add("ufo", 150.0, {"dir": 1.0, "spd": 0.0, "par": 0.5})
+	_add("astronaut", 168.0, {"ph": 0.0, "par": 0.55})
+	_add("planet", 185.0, {"col": _PLANET_COLS[0], "r": 96.0, "ring": true, "par": 0.2})
+	_add("shootingstar", 190.0, {"ph": 0.0, "period": 6.0, "dir": 1.0, "par": 0.5})
+
+
+func _add(kind: String, alt: float, extra: Dictionary) -> void:
+	var d := {"kind": kind, "alt": alt, "x": randf() * VW}
+	d.merge(extra)
+	_env.append(d)
+
+
+func _dir() -> float:
+	return 1.0 if randf() < 0.5 else -1.0
+
+
+func _pick(arr: Array):
+	return arr[randi() % arr.size()]
 
 
 func _process(_delta: float) -> void:
 	queue_redraw()
 
 
-## 어떤 고도(alt)의 물체가 지금 화면 어디(y)에 오는가 — 고도가 오를수록 아래로 내려온다.
 func _alt_to_y(alt: float, par: float) -> float:
 	return REF_Y + (meters - alt) * PX_PER_M * par
 
@@ -99,30 +145,25 @@ func _draw() -> void:
 	var cols := _sky_colors()
 	var top: Color = cols[0]
 	var bot: Color = cols[1]
-	# 세로 그라데이션
 	var bands := 28
 	for i in bands:
-		var f := float(i) / float(bands - 1)
-		draw_rect(Rect2(0, VH * i / bands, VW, VH / bands + 1), top.lerp(bot, f))
+		draw_rect(Rect2(0, VH * i / bands, VW, VH / bands + 1), top.lerp(bot, float(i) / float(bands - 1)))
 
-	# 해 — 지상에서 밝게. 올라갈수록 서서히 내려가며(고도감) 성층권 전에 사라진다.
-	# (아무리 올라도 해보다 높이 갈 순 없으니 완전히 지나치진 않고 위쪽에서 페이드아웃)
-	var sun_a := clampf((225.0 - meters) / 135.0, 0.0, 1.0)   # 구름대 진입 전 사라짐
+	# 먼 우주 배경(행성) → 별 → 우주 물체(위성/정거장/우주인/UFO/별똥별)
+	for e in _env:
+		if e["kind"] == "planet":
+			_draw_env(e)
+	_draw_stars()
+	for e in _env:
+		if e["kind"] in ["satellite", "iss", "astronaut", "ufo", "shootingstar"]:
+			_draw_env(e)
+
+	# 해 (지상)
+	var sun_a := clampf((52.0 - meters) / 38.0, 0.0, 1.0)
 	if sun_a > 0.0:
-		var sun_y := 200.0 + meters * 0.62      # 오를수록 아래로 내려감(고도 상승 체감)
-		_draw_sun(Vector2(VW - 148.0, sun_y), sun_a)
+		_draw_sun(Vector2(VW - 148.0, 200.0 + meters * 0.9), sun_a)
 
-	# 별 — 고도별 위치. 올라가면 아래로 흐른다(우주로 상승하는 느낌).
-	var star_a := clampf((meters - 560.0) / 160.0, 0.0, 1.0)
-	if star_a > 0.0:
-		for s in _stars:
-			var sy := _alt_to_y(float(s["alt"]), float(s["par"]))
-			if sy < -20.0 or sy > VH + 20.0:
-				continue
-			var tw := 0.45 + 0.55 * sin(t * 2.0 + float(s["ph"]))
-			draw_circle(Vector2(float(s["x"]), sy), float(s["size"]), Color(1, 1, 1, star_a * tw))
-
-	# 바람 스트릭 — 바람 세기에 따라. 고도 위치로 배치되어 함께 흐른다.
+	# 바람 스트릭
 	var ws := absf(wind)
 	if ws > 0.06:
 		var dir := signf(wind)
@@ -131,25 +172,79 @@ func _draw() -> void:
 			if sy < 0.0 or sy > VH:
 				continue
 			var x := fmod(float(st["x0"]) + t * dir * (200.0 + 500.0 * ws), VW + 200.0) - 100.0
-			draw_line(Vector2(x, sy), Vector2(x - dir * float(st["len"]), sy),
-				Color(0.9, 0.94, 1.0, ws * 0.4), 2.0)
+			draw_line(Vector2(x, sy), Vector2(x - dir * float(st["len"]), sy), Color(0.9, 0.94, 1.0, ws * 0.4), 2.0)
 
-	# 구름 — 각자의 고도에 배치. 올라갈수록 아래로 지나간다(패럴랙스).
+	# 구름 (좌우로도 흐른다)
 	for c in _clouds:
-		var cy := _alt_to_y(c["alt"], c["par"])
+		var cy := _alt_to_y(float(c["alt"]), float(c["par"]))
 		if cy < -240.0 or cy > VH + 240.0:
 			continue
-		# 화면 위/아래 가장자리에서 부드럽게 사라지도록 페이드
 		var a := clampf((cy + 220.0) / 150.0, 0.0, 1.0) * clampf((VH + 220.0 - cy) / 150.0, 0.0, 1.0)
-		# 가벼운 가로 흐름 + 바람 밀림
-		var cx := float(c["x"]) + sin(t * 0.08 + float(c["alt"]) * 0.7) * 16.0 + wind * 40.0 * float(c["par"])
+		var cx := wrapf(float(c["x"]) + t * float(c["vx"]), -240.0, VW + 240.0) \
+			+ sin(t * 0.1 + float(c["alt"])) * 8.0 + wind * 40.0 * float(c["par"])
 		if c["kind"] == "cirrus":
 			_draw_cirrus(Vector2(cx, cy), float(c["scale"]), a)
 		else:
 			_draw_cloud(Vector2(cx, cy), float(c["scale"]), a)
 
+	# 가까운 환경요소(구름 앞): 풍선·비행기·새떼·나비
+	for e in _env:
+		if e["kind"] in ["balloon", "plane", "birdflock", "butterfly"]:
+			_draw_env(e)
 
-## 카툰 해 — 부드러운 후광 + 둥근 몸통 + 은은한 외곽선
+
+func _draw_stars() -> void:
+	var star_a := clampf((meters - 100.0) / 45.0, 0.0, 1.0)
+	if star_a <= 0.0:
+		return
+	for s in _stars:
+		var sy := _alt_to_y(float(s["alt"]), float(s["par"]))
+		if sy < -20.0 or sy > VH + 20.0:
+			continue
+		var tw := 0.45 + 0.55 * sin(t * 2.0 + float(s["ph"]))
+		draw_circle(Vector2(float(s["x"]), sy), float(s["size"]), Color(1, 1, 1, star_a * tw))
+
+
+func _draw_env(e: Dictionary) -> void:
+	var par := float(e.get("par", 0.6))
+	var y := _alt_to_y(float(e["alt"]), par)
+	if y < -160.0 or y > VH + 160.0:
+		return
+	match e["kind"]:
+		"butterfly":
+			var bx := float(e["x"]) + sin(t * 2.4 + float(e["ph"])) * 46.0
+			_draw_butterfly(Vector2(bx, y + sin(t * 3.3 + float(e["ph"])) * 10.0), e["col"], t * 9.0 + float(e["ph"]))
+		"birdflock":
+			var fx := wrapf(float(e["x"]) + t * float(e["spd"]) * float(e["dir"]), -160.0, VW + 160.0)
+			_draw_birdflock(Vector2(fx, y), int(e["n"]), float(e["dir"]))
+		"balloon":
+			var alt2 := float(e["alt"]) + fmod(t * float(e["rise"]), 120.0)   # 천천히 상승
+			var byy := _alt_to_y(alt2, par)
+			var bxx := float(e["x"]) + sin(t * 0.6 + float(e["ph"])) * 18.0
+			_draw_balloon(Vector2(bxx, byy), e["col"])
+		"plane":
+			var px := wrapf(float(e["x"]) + t * float(e["spd"]) * float(e["dir"]), -200.0, VW + 200.0)
+			_draw_plane(Vector2(px, y), float(e["dir"]))
+		"satellite":
+			var sx := wrapf(float(e["x"]) + t * float(e["spd"]) * float(e["dir"]), -160.0, VW + 160.0)
+			_draw_satellite(Vector2(sx, y), float(e["dir"]))
+		"iss":
+			var ix := wrapf(float(e["x"]) + t * float(e["spd"]) * float(e["dir"]), -200.0, VW + 200.0)
+			_draw_iss(Vector2(ix, y))
+		"astronaut":
+			var ax := float(e["x"]) + sin(t * 0.3 + float(e["ph"])) * 34.0
+			_draw_astronaut(Vector2(ax, y + sin(t * 0.5 + float(e["ph"])) * 14.0), sin(t * 0.2) * 0.25)
+		"planet":
+			_draw_planet(Vector2(float(e["x"]), y), float(e["r"]), e["col"], bool(e["ring"]))
+		"ufo":
+			var ux := wrapf(float(e["x"]) + t * float(e["spd"]) * float(e["dir"]), -180.0, VW + 180.0)
+			_draw_ufo(Vector2(ux, y + sin(t * 1.3) * 8.0))
+		"shootingstar":
+			_draw_shootingstar(e, y)
+
+
+# ---------------------------------------------------------------- 그리기 헬퍼
+
 func _draw_sun(c: Vector2, a: float) -> void:
 	draw_circle(c, 96.0, Color(1.0, 0.94, 0.66, 0.18 * a))
 	draw_circle(c, 76.0, Color(1.0, 0.95, 0.72, 0.30 * a))
@@ -158,7 +253,6 @@ func _draw_sun(c: Vector2, a: float) -> void:
 	draw_circle(c + Vector2(-16, -18), 16.0, Color(1.0, 0.98, 0.86, 0.55 * a))
 
 
-## 폭신한 적운(뭉게구름) — 원 뭉치 + 밝은 아랫면 + 부드러운 흰 외곽선
 func _draw_cloud(pos: Vector2, sc: float, a: float) -> void:
 	var lobes := [Vector2(0, 0), Vector2(46, 8), Vector2(-46, 8), Vector2(24, -14), Vector2(-24, -12)]
 	var body := Color(0.99, 0.99, 1.0, 0.94 * a)
@@ -170,10 +264,149 @@ func _draw_cloud(pos: Vector2, sc: float, a: float) -> void:
 	draw_circle(pos + Vector2(0, 12) * sc, 30.0 * sc, Color(0.86, 0.89, 0.96, 0.32 * a))
 
 
-## 얇게 늘어진 권운(성층권) — 가로로 긴 옅은 띠 몇 겹
 func _draw_cirrus(pos: Vector2, sc: float, a: float) -> void:
 	var col := Color(0.92, 0.95, 1.0, 0.42 * a)
 	for row in [-10.0, 0.0, 10.0]:
 		for k in range(-3, 4):
-			var p := pos + Vector2(k * 34.0 * sc, row * sc + sin(k * 1.3 + pos.x * 0.01) * 4.0)
-			draw_circle(p, 20.0 * sc, col)
+			draw_circle(pos + Vector2(k * 34.0 * sc, row * sc + sin(k * 1.3 + pos.x * 0.01) * 4.0), 20.0 * sc, col)
+
+
+## 나비 — 색 날개 두 쌍(펄럭임) + 몸통 + 더듬이
+func _draw_butterfly(c: Vector2, col: Color, flap: float) -> void:
+	var w := 0.45 + 0.55 * absf(sin(flap))       # 날개 펼침 정도(가로 스케일)
+	var wc: Color = col
+	for sx in [-1.0, 1.0]:
+		var dx := sx * 11.0 * w
+		draw_circle(c + Vector2(dx, -4.0), 9.0, wc)                 # 윗날개
+		draw_circle(c + Vector2(dx * 0.9, 6.0), 7.0, wc.darkened(0.12))  # 아랫날개
+		draw_arc(c + Vector2(dx, -4.0), 9.0, 0, TAU, 16, OUTLINE, 1.4)
+		draw_arc(c + Vector2(dx * 0.9, 6.0), 7.0, 0, TAU, 16, OUTLINE, 1.4)
+	draw_line(c + Vector2(0, -8), c + Vector2(0, 9), Color(0.15, 0.13, 0.16), 2.5)  # 몸통
+	draw_line(c + Vector2(0, -8), c + Vector2(-4, -14), Color(0.15, 0.13, 0.16), 1.4)
+	draw_line(c + Vector2(0, -8), c + Vector2(4, -14), Color(0.15, 0.13, 0.16), 1.4)
+
+
+## 새떼 — 느슨한 V 대형, 각자 날갯짓
+func _draw_birdflock(c: Vector2, n: int, dir: float) -> void:
+	for i in n:
+		var off := Vector2((i - n / 2) * 26.0 * dir, absf(i - n / 2) * 15.0)
+		_draw_bird_glyph(c + off, sin(t * 6.0 + i) * 0.5)
+
+
+func _draw_bird_glyph(p: Vector2, flap: float) -> void:
+	var col := Color(0.16, 0.17, 0.22)
+	var dy := flap * 6.0
+	draw_line(p + Vector2(-11, dy), p, col, 3.0)
+	draw_line(p + Vector2(11, dy), p, col, 3.0)
+
+
+## 풍선 — 색 몸통 + 매듭 + 구불구불 줄
+func _draw_balloon(c: Vector2, col: Color) -> void:
+	draw_circle(c, 20.0, col)
+	draw_circle(c + Vector2(0, 4), 20.0, col)               # 살짝 물방울꼴
+	draw_circle(c + Vector2(-6, -7), 6.0, col.lightened(0.35))  # 하이라이트
+	draw_arc(c, 20.0, 0, TAU, 24, OUTLINE, 2.0)
+	var knot := c + Vector2(0, 21)
+	draw_colored_polygon(PackedVector2Array([knot + Vector2(-5, 0), knot + Vector2(5, 0), knot + Vector2(0, 8)]), col.darkened(0.2))
+	var pts := PackedVector2Array()
+	for k in 9:
+		pts.append(knot + Vector2(sin(t * 2.0 + k * 0.9) * 5.0, 8.0 + k * 7.0))
+	draw_polyline(pts, Color(0.3, 0.3, 0.34, 0.8), 1.6)
+
+
+## 비행기 — 옆모습 실루엣 (dir 방향)
+func _draw_plane(c: Vector2, dir: float) -> void:
+	var body := Color(0.93, 0.94, 0.98)
+	draw_set_transform(c, 0.0, Vector2(dir, 1.0))
+	draw_colored_polygon(PackedVector2Array([Vector2(-34, 0), Vector2(24, -7), Vector2(38, 0), Vector2(24, 7)]), body)
+	draw_colored_polygon(PackedVector2Array([Vector2(-8, -3), Vector2(10, -22), Vector2(18, -3)]), body.darkened(0.08))  # 날개
+	draw_colored_polygon(PackedVector2Array([Vector2(-30, -2), Vector2(-22, -16), Vector2(-16, -2)]), body.darkened(0.08))  # 꼬리
+	draw_polyline(PackedVector2Array([Vector2(-34, 0), Vector2(24, -7), Vector2(38, 0), Vector2(24, 7), Vector2(-34, 0)]), OUTLINE, 1.8)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## 인공위성 — 본체 + 태양전지판 + 접시 + 깜빡이 불빛
+func _draw_satellite(c: Vector2, dir: float) -> void:
+	var panel := Color(0.28, 0.42, 0.78)
+	for sx in [-1.0, 1.0]:
+		var pr := Rect2(c.x + sx * 20.0 - 16.0, c.y - 9.0, 32.0, 18.0)
+		draw_rect(pr, panel)
+		draw_rect(pr, OUTLINE, false, 1.6)
+		for g in range(1, 4):
+			draw_line(Vector2(pr.position.x + g * 8.0, pr.position.y), Vector2(pr.position.x + g * 8.0, pr.position.y + 18.0), OUTLINE, 1.0)
+	draw_rect(Rect2(c.x - 9.0, c.y - 10.0, 18.0, 20.0), Color(0.85, 0.86, 0.9))
+	draw_rect(Rect2(c.x - 9.0, c.y - 10.0, 18.0, 20.0), OUTLINE, false, 1.8)
+	draw_circle(c + Vector2(dir * 14.0, -12.0), 6.0, Color(0.8, 0.82, 0.86))   # 접시
+	var blink := 0.5 + 0.5 * sin(t * 5.0)
+	draw_circle(c + Vector2(0, -13.0), 2.6, Color(1.0, 0.35, 0.3, blink))
+
+
+## 우주정거장(ISS) — 중앙 모듈 + 큰 태양전지판 여러 장
+func _draw_iss(c: Vector2) -> void:
+	var panel := Color(0.24, 0.36, 0.72)
+	draw_line(c + Vector2(-58, 0), c + Vector2(58, 0), Color(0.7, 0.72, 0.78), 4.0)   # 트러스
+	for sx in [-1.0, 1.0]:
+		for j in [-1.0, 1.0]:
+			var pr := Rect2(c.x + sx * 36.0 - 22.0, c.y + j * 20.0 - 12.0, 44.0, 24.0)
+			draw_rect(pr, panel)
+			draw_rect(pr, OUTLINE, false, 1.6)
+	draw_rect(Rect2(c.x - 14.0, c.y - 9.0, 28.0, 18.0), Color(0.86, 0.87, 0.9))       # 모듈
+	draw_rect(Rect2(c.x - 14.0, c.y - 9.0, 28.0, 18.0), OUTLINE, false, 1.8)
+	draw_circle(c + Vector2(0, -14.0), 2.6, Color(0.9, 0.95, 1.0, 0.5 + 0.5 * sin(t * 4.0)))
+
+
+## 우주인 — 헬멧(바이저) + 몸통 + 생명줄
+func _draw_astronaut(c: Vector2, tilt: float) -> void:
+	draw_set_transform(c, tilt, Vector2.ONE)
+	draw_line(Vector2(0, -6), Vector2(-70, -46), Color(0.75, 0.78, 0.82, 0.7), 2.0)   # 생명줄
+	var suit := Color(0.92, 0.93, 0.97)
+	draw_line(Vector2(-9, 6), Vector2(-20, 20), suit, 8.0)     # 팔다리
+	draw_line(Vector2(9, 6), Vector2(20, 18), suit, 8.0)
+	draw_line(Vector2(-6, 16), Vector2(-12, 34), suit, 9.0)
+	draw_line(Vector2(6, 16), Vector2(12, 34), suit, 9.0)
+	draw_rect(Rect2(-13, 12, 26, 10), Color(0.8, 0.82, 0.88))  # 백팩 살짝
+	var body := Rect2(-12, -6, 24, 26)
+	draw_rect(body, suit)
+	draw_rect(body, OUTLINE, false, 2.0)
+	draw_circle(Vector2(0, -14), 15.0, suit)                   # 헬멧
+	draw_arc(Vector2(0, -14), 15.0, 0, TAU, 22, OUTLINE, 2.0)
+	draw_circle(Vector2(0, -14), 10.0, Color(0.20, 0.35, 0.50))  # 바이저
+	draw_circle(Vector2(-3, -17), 3.5, Color(0.7, 0.85, 0.95, 0.8))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## 행성 — 큰 원 + 명암 + (옵션)고리
+func _draw_planet(c: Vector2, r: float, col: Color, ring: bool) -> void:
+	draw_circle(c, r, col)
+	draw_circle(c + Vector2(-r * 0.28, -r * 0.28), r * 0.7, col.lightened(0.12))  # 밝은 면
+	draw_circle(c + Vector2(r * 0.32, r * 0.30), r * 0.55, col.darkened(0.18))    # 그림자
+	draw_arc(c, r, 0, TAU, 48, col.darkened(0.35), 2.0)
+	if ring:
+		for rr in [r * 1.5, r * 1.62, r * 1.74]:
+			draw_arc(c, rr, 0.0, TAU, 60, Color(0.85, 0.82, 0.7, 0.5), 2.5)
+
+
+## UFO — 접시 + 돔 + 아래 불빛
+func _draw_ufo(c: Vector2) -> void:
+	draw_circle(c + Vector2(0, 4), 10.0, Color(0.6, 0.95, 0.7, 0.25))   # 광선 후광
+	var disc := Color(0.62, 0.66, 0.74)
+	draw_colored_polygon(PackedVector2Array([Vector2(c.x - 34, c.y), Vector2(c.x, c.y - 9), Vector2(c.x + 34, c.y), Vector2(c.x, c.y + 9)]), disc)
+	draw_polyline(PackedVector2Array([Vector2(c.x - 34, c.y), Vector2(c.x, c.y - 9), Vector2(c.x + 34, c.y), Vector2(c.x, c.y + 9), Vector2(c.x - 34, c.y)]), OUTLINE, 1.6)
+	draw_circle(c + Vector2(0, -6), 12.0, Color(0.55, 0.85, 0.95, 0.9))  # 돔
+	draw_arc(c + Vector2(0, -6), 12.0, 0, TAU, 20, OUTLINE, 1.6)
+	for k in [-20.0, -7.0, 7.0, 20.0]:
+		draw_circle(c + Vector2(k, 3), 2.4, Color(1.0, 0.9, 0.4, 0.5 + 0.5 * sin(t * 6.0 + k)))
+
+
+## 별똥별 — 주기적으로 대각선으로 지나감
+func _draw_shootingstar(e: Dictionary, y: float) -> void:
+	var period := float(e["period"])
+	var ph := fmod(t + float(e["ph"]), period) / period
+	if ph > 0.22:
+		return
+	var f := ph / 0.22
+	var dir := float(e["dir"])
+	var head := Vector2(float(e["x"]) + dir * (f - 0.3) * 520.0, y + (f - 0.3) * 240.0)
+	var tail := head - Vector2(dir * 90.0, 42.0)
+	draw_line(tail, head, Color(1, 1, 1, (1.0 - f) * 0.8), 2.5)
+	draw_circle(head, 2.6, Color(1, 1, 1, 1.0 - f))
