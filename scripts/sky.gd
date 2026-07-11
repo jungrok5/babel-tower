@@ -276,7 +276,7 @@ func _draw_butterfly(c: Vector2, col: Color, flap: float) -> void:
 	var w := 0.45 + 0.55 * absf(sin(flap))       # 날개 펼침 정도(가로 스케일)
 	var wc: Color = col
 	for sx in [-1.0, 1.0]:
-		var dx := sx * 11.0 * w
+		var dx := float(sx) * 11.0 * w
 		draw_circle(c + Vector2(dx, -4.0), 9.0, wc)                 # 윗날개
 		draw_circle(c + Vector2(dx * 0.9, 6.0), 7.0, wc.darkened(0.12))  # 아랫날개
 		draw_arc(c + Vector2(dx, -4.0), 9.0, 0, TAU, 16, OUTLINE, 1.4)
