@@ -7,11 +7,13 @@ extends Node2D
 enum State { CALIB, READY, OVER }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v2.9 · wind"
+const GAME_VERSION := "v3.0 · touch"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
 const BLOCK_SIZE := Vector2(180.0, 62.0)
+const BLOCK_LEN_MIN := 90.0         # 두 손가락 드래그로 줄일 수 있는 최소 길이
+const BLOCK_LEN_MAX := 320.0        # 늘릴 수 있는 최대 길이
 const DROP_HEIGHT := 150.0          # 다음 벽돌이 떨어지기 시작하는 높이(짧게 = 연사 쌓기 쾌감)
 const TIP_ANGLE := 0.5              # 블록이 이 각도 이상 기울면 붕괴 (~28°)
 const COLLAPSE_FALL := 170.0        # 바닥 아래로 이만큼 떨어지면 붕괴
@@ -34,7 +36,14 @@ var web_permission_asked := false
 var floor_body: AnimatableBody2D    # 센서에 따라 좌우로 움직이는 물리 바닥(+토대)
 var aiming := false                 # 손을 대고 위치를 조준 중인가
 var aim_x := BASE_X                 # 떨어뜨릴 가로 위치(월드 좌표)
+var aim_rot := 0.0                  # 놓을 블록의 회전(두 손가락 탭으로 90°씩)
+var aim_len := BLOCK_SIZE.x         # 놓을 블록의 길이(두 손가락 드래그로 조절)
 var drag_start_world := 0.0         # 드래그 시작 지점(상대 이동 기준)
+var mod_index := -1                 # 두 번째 손가락(회전/길이)의 터치 인덱스
+var mod_start := Vector2.ZERO       # 두 번째 손가락이 처음 닿은 화면 좌표
+var mod_moved := false              # 두 번째 손가락이 드래그됐는가(=길이조절)
+var mod_base_len := 0.0             # 드래그 시작 시점의 길이
+var gyro_locked := false            # (개발용) 자이로 잠금 — 바닥을 수평 고정
 var show_guides := false            # 안정도바·중심선 표시 (기본 숨김)
 var last_milestone := 0             # 마지막으로 돌파한 미터 구간
 var record_broken := false          # 이번 판에 최고기록을 깼는가
@@ -60,6 +69,7 @@ var hint_label: Label
 var stab_fill: ColorRect
 var guides_group: Control
 var guide_btn: Button
+var gyro_btn: Button
 var calib_panel: Control
 var calib_label: Label
 var calib_button: Button
@@ -172,11 +182,6 @@ func _make_rect_poly(center: Vector2, size: Vector2, color: Color) -> Polygon2D:
 	return p
 
 
-func _make_block(level: int) -> Block:
-	var b := Block.new()
-	b.setup(BLOCK_SIZE, _brick_color(level))
-	return b
-
 
 func _brick_color(level: int) -> Color:
 	# 층마다 미묘하게 색을 달리해 쌓임을 시각적으로 구분
@@ -215,11 +220,14 @@ func _on_sensor_enable() -> void:
 
 
 ## 지정한 가로 위치(at_x) 위에서 벽돌을 떨어뜨린다. 이 블록이 닿기 전엔 다음 블록을 못 놓는다.
+## 현재 선택된 회전(aim_rot)·길이(aim_len)를 반영해 생성한다.
 func _drop_block(at_x: float = BASE_X) -> void:
 	# 세로는 항상 탑 꼭대기 위에서 낙하 (가로는 손 뗀 위치)
-	var sy := _tower_top_edge() - BLOCK_SIZE.y * 0.5 - DROP_HEIGHT
-	var b := _make_block(score + 1)
+	var sy := _tower_top_edge() - _aim_half_h() - DROP_HEIGHT
+	var b := Block.new()
+	b.setup(Vector2(aim_len, BLOCK_SIZE.y), _brick_color(score + 1))
 	b.position = Vector2(at_x, sy)
+	b.rotation = aim_rot
 	b.landed.connect(_on_block_landed)
 	add_child(b)
 	blocks.append(b)
@@ -227,6 +235,24 @@ func _drop_block(at_x: float = BASE_X) -> void:
 	settle_time = 0.0
 	score += 1
 	_check_progress()
+
+
+## 회전·길이를 반영한 블록의 수직 반높이(낙하 시작 높이 계산용)
+func _aim_half_h() -> float:
+	return 0.5 * (absf(aim_len * sin(aim_rot)) + absf(BLOCK_SIZE.y * cos(aim_rot)))
+
+
+## 놓을 블록을 90° 회전 (두 손가락 탭)
+func _rotate_block() -> void:
+	aim_rot = fmod(aim_rot + PI * 0.5, TAU)
+
+
+## (개발용) 자이로 잠금 토글 — 바닥을 수평 고정해 '어디까지 쌓이나' 확인용
+func _toggle_gyro_lock() -> void:
+	gyro_locked = not gyro_locked
+	gyro_btn.text = "자이로 풀기" if gyro_locked else "자이로 잠금"
+	gyro_btn.add_theme_color_override("font_color",
+		Color(1.0, 0.62, 0.3) if gyro_locked else Color(0.8, 0.82, 0.9))
 
 
 ## 다음 블록을 놓을 수 있는가 (직전 블록이 닿았거나 없으면 가능)
@@ -323,6 +349,9 @@ func _restart() -> void:
 	aiming = false
 	settling = null
 	aim_x = BASE_X
+	aim_rot = 0.0
+	aim_len = BLOCK_SIZE.x
+	mod_index = -1
 	last_milestone = 0
 	record_broken = false
 	wind_cur = 0.0
@@ -349,25 +378,69 @@ func _restart() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	# 어디를 눌러도 벽돌은 '중앙'에서 시작. 누른 지점 기준으로 좌우로 끌면 그만큼 이동,
 	# 떼면 낙하. (터치는 emulate_mouse_from_touch로 마우스 이벤트가 된다)
+	# 키보드(개발/데스크톱): Space=낙하, R=회전, [ ]=길이, G=자이로 잠금
 	if event is InputEventKey:
-		if event.pressed and not event.echo and event.keycode == KEY_SPACE \
-				and state == State.READY and _can_drop():
-			_drop_block(_clamp_aim(BASE_X))
+		if event.pressed and not event.echo:
+			match event.keycode:
+				KEY_SPACE:
+					if state == State.READY and _can_drop():
+						_drop_block(_clamp_aim(BASE_X))
+				KEY_R:
+					if state == State.READY:
+						_rotate_block()
+				KEY_BRACKETLEFT:
+					aim_len = clampf(aim_len - 20.0, BLOCK_LEN_MIN, BLOCK_LEN_MAX)
+				KEY_BRACKETRIGHT:
+					aim_len = clampf(aim_len + 20.0, BLOCK_LEN_MIN, BLOCK_LEN_MAX)
+				KEY_G:
+					_toggle_gyro_lock()
 		return
 
+	# 첫 손가락(또는 마우스): 조준/낙하. (터치는 첫 손가락이 마우스로 에뮬레이션됨)
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			if state == State.READY and _can_drop():
 				aiming = true
 				drag_start_world = _screen_to_world_x(event.position)
 				aim_x = BASE_X                     # 무조건 중앙에서 시작
+				aim_rot = 0.0                      # 블록마다 회전/길이는 초기화
+				aim_len = BLOCK_SIZE.x
+				mod_index = -1
 		else:  # 손을 뗌 → 그 위치에 낙하
 			if aiming and state == State.READY:
 				_drop_block(aim_x)
 			aiming = false
-	elif aiming and (event is InputEventMouseMotion or event is InputEventScreenDrag):
+			mod_index = -1
+		return
+	if event is InputEventMouseMotion and aiming:
 		# 누른 지점 대비 이동량만큼 중앙에서 좌우로
 		aim_x = _clamp_aim(BASE_X + _screen_to_world_x(event.position) - drag_start_world)
+		return
+	# 데스크톱 보조: 우클릭 = 회전
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT \
+			and event.pressed and aiming:
+		_rotate_block()
+		return
+
+	# 두 번째 손가락: 탭 = 90° 회전, 드래그 = 길이조절
+	if event is InputEventScreenTouch and event.index >= 1:
+		if event.pressed:
+			if aiming and mod_index == -1:
+				mod_index = event.index
+				mod_start = event.position
+				mod_moved = false
+				mod_base_len = aim_len
+		elif event.index == mod_index:
+			if not mod_moved:                      # 움직이지 않았으면 탭 → 회전
+				_rotate_block()
+			mod_index = -1
+		return
+	if event is InputEventScreenDrag and event.index == mod_index:
+		if event.position.distance_to(mod_start) > 12.0:
+			mod_moved = true
+		aim_len = clampf(mod_base_len + (event.position.x - mod_start.x) * 1.5,
+			BLOCK_LEN_MIN, BLOCK_LEN_MAX)
+		return
 
 
 func _screen_to_world_x(screen_pos: Vector2) -> float:
@@ -383,10 +456,15 @@ func _clamp_aim(x: float) -> float:
 func _physics_process(delta: float) -> void:
 	# 센서 기울기만큼 바닥(판자)을 기울인다(경사). 중력은 항상 아래로 고정.
 	# 바닥이 수평이면 블록은 잠들어(sleep) 떨림이 없다. 기울면 경사 때문에 위 블록이 넘어진다.
-	var target_angle := _tilt_amount() * MAX_TILT_ANGLE
-	if state == State.READY:
-		_update_wind(delta)                 # 간헐적 돌풍(고도 구간에서만) → 바닥을 민다
-		target_angle += wind_cur * WIND_ANGLE
+	var target_angle := 0.0
+	if gyro_locked:
+		# (개발용) 자이로 잠금: 바닥을 수평 고정하고 바람도 잦아들게 한다
+		wind_cur = lerpf(wind_cur, 0.0, 0.1)
+	else:
+		target_angle = _tilt_amount() * MAX_TILT_ANGLE
+		if state == State.READY:
+			_update_wind(delta)             # 간헐적 돌풍(고도 구간에서만) → 바닥을 민다
+			target_angle += wind_cur * WIND_ANGLE
 	if is_instance_valid(floor_body):
 		floor_body.rotation = lerpf(floor_body.rotation, target_angle, 0.15)
 
@@ -529,15 +607,21 @@ func _draw() -> void:
 			Vector2(BASE_X, GROUND_TOP_Y + 40.0),
 			Color(0.55, 0.6, 0.75, 0.28), 2.0, 14.0)
 
-	# 2) 조준 중일 때만: 손을 뗄 위치에 고스트 칸 + 바닥까지 내려가는 낙하 컬럼
+	# 2) 조준 중일 때만: 회전/길이를 반영한 고스트 칸 + 바닥까지 내려가는 낙하 컬럼
 	if aiming:
-		var sy := top_edge - DROP_HEIGHT
-		var alpha := 0.85
-		var ghost := Rect2(Vector2(aim_x, sy) - BLOCK_SIZE * 0.5, BLOCK_SIZE)
-		draw_rect(ghost, Color(0.96, 0.9, 0.6, 0.16 * alpha), true)          # 반투명 채움
-		draw_rect(ghost, Color(0.98, 0.92, 0.55, alpha), false, 3.0)         # 테두리
+		var half_h := _aim_half_h()
+		var center := Vector2(aim_x, top_edge - half_h - DROP_HEIGHT)
+		var hw := aim_len * 0.5
+		var hh := BLOCK_SIZE.y * 0.5
+		var pts := PackedVector2Array()
+		for corner in [Vector2(-hw, -hh), Vector2(hw, -hh), Vector2(hw, hh), Vector2(-hw, hh)]:
+			pts.append(center + corner.rotated(aim_rot))
+		draw_colored_polygon(pts, Color(0.96, 0.9, 0.6, 0.16))              # 반투명 채움
+		var outline := pts
+		outline.append(pts[0])
+		draw_polyline(outline, Color(0.98, 0.92, 0.55, 0.85), 3.0)          # 테두리
 		draw_dashed_line(
-			Vector2(aim_x, sy + BLOCK_SIZE.y * 0.5),
+			Vector2(aim_x, center.y + half_h),
 			Vector2(aim_x, GROUND_TOP_Y),
 			Color(0.98, 0.92, 0.55, 0.5), 2.0, 12.0)
 
@@ -591,7 +675,7 @@ func _update_ui(delta: float) -> void:
 					state = State.READY
 				calib_label.text = "가장 편안한 자세로\n기기를 잡으세요\n\n· 보정 중 ·"
 		State.READY:
-			hint_label.text = "눌러서 좌우로 끌어 위치를 정하고 떼면 떨어집니다\n기기를 수평으로 — 기울이면 바닥이 움직여 탑이 쏠립니다"
+			hint_label.text = "끌어서 위치 · 두 손가락 탭=회전 · 두 손가락 드래그=길이\n기기를 수평으로 — 기울이면 바닥이 움직여 탑이 쏠립니다"
 		State.OVER:
 			hint_label.text = ""
 
@@ -648,6 +732,17 @@ func _build_ui() -> void:
 	guide_btn.focus_mode = Control.FOCUS_NONE
 	guide_btn.pressed.connect(_toggle_guides)
 	ui.add_child(guide_btn)
+
+	# (개발용) 자이로 잠금 토글 — 가이드 버튼 아래
+	gyro_btn = Button.new()
+	gyro_btn.text = "자이로 잠금"
+	gyro_btn.add_theme_font_override("font", ui_font)
+	gyro_btn.add_theme_font_size_override("font_size", 22)
+	gyro_btn.position = Vector2(508, 168)
+	gyro_btn.custom_minimum_size = Vector2(172, 48)
+	gyro_btn.focus_mode = Control.FOCUS_NONE
+	gyro_btn.pressed.connect(_toggle_gyro_lock)
+	ui.add_child(gyro_btn)
 
 	# 하단 힌트
 	hint_label = _make_label("", 30, Color(0.78, 0.8, 0.88))

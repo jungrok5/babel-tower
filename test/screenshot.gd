@@ -22,15 +22,38 @@ func _ready() -> void:
 	await _shot("01_start")            # 지면 + 토대 + 낮은 하늘
 
 	# 낮은 탑 쌓기
-	await _build(6)
+	await _build(5)
 	await _settle(40)
 	await _shot("02_stack")            # 몇 층 쌓인 모습
 
-	# 바닥(판자) 기울이기 → 경사로 탑이 쏠림
+	# 회전/길이 조절 블록 — 세운 기둥 + 넓은 블록 + 좁은 블록
+	main.aim_rot = PI * 0.5
+	main._drop_block(main.BASE_X - 34.0)
+	await _wait_land()
+	main.aim_rot = 0.0
+	main.aim_len = 300.0
+	main._drop_block(main.BASE_X + 20.0)
+	await _wait_land()
+	main.aim_len = 110.0
+	main._drop_block(main.BASE_X)
+	await _wait_land()
+	main.aim_rot = 0.0
+	main.aim_len = main.BLOCK_SIZE.x
+	await _settle(30)
+	await _shot("03_shapes")           # 회전(기둥)·길이(넓게/좁게) 블록
+
+	# (개발용) 자이로 잠금 검증: 최대로 기울여도 바닥이 수평 유지
 	Motion.set_process(false)
+	main.gyro_locked = true
+	Motion._sway = 1.0
+	await _settle(75)
+	await _shot("04_gyrolock")         # 바닥 수평 유지(탑 안 쏠림)
+
+	# 잠금 해제 → 기울이면 바닥이 경사져 탑이 쏠림
+	main.gyro_locked = false
 	Motion._sway = 0.5
-	await _settle(70)
-	await _shot("03_tilt")             # 기운 바닥 + 쏠린 탑
+	await _settle(75)
+	await _shot("05_tilt")             # 기운 바닥 + 쏠린 탑
 	Motion._sway = 0.0
 	await _settle(70)
 
@@ -42,12 +65,12 @@ func _ready() -> void:
 		if main.wind_fx != null:
 			main.wind_fx.wind = 1.0
 		await get_tree().physics_frame
-	await _shot("04_wind")             # 전경 바람결/티끌
+	await _shot("06_wind")             # 전경 바람결/티끌
 
 	# 앉은 새 — 상태를 PERCH(3)로 강제해 앉은 자세를 캡처
 	_force_perched_bird()
 	await _settle(24)
-	await _shot("05_bird")             # 블록 위에 앉은 새
+	await _shot("07_bird")             # 블록 위에 앉은 새
 
 	# 붕괴 — 세게 기울여 블록이 바닥에 닿게 만든 뒤 줌아웃 장면
 	if is_instance_valid(main.bird):
@@ -59,9 +82,17 @@ func _ready() -> void:
 		await get_tree().physics_frame
 		g += 1
 	await _settle(90)                  # 카메라 줌아웃 대기
-	await _shot("06_collapse")         # 붕괴/줌아웃
+	await _shot("08_collapse")         # 붕괴/줌아웃
 
 	get_tree().quit()
+
+
+## 방금 놓은 블록이 착지할 때까지 대기
+func _wait_land() -> void:
+	var w := 0
+	while main.settling != null and is_instance_valid(main.settling) and w < 150:
+		await get_tree().physics_frame
+		w += 1
 
 
 ## n개 블록을 놓되, 각 블록이 착지(settling 해제)할 때까지 기다린다.
