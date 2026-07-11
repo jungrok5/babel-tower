@@ -80,17 +80,17 @@ func regen_env() -> void:
 	if randf() < 0.85:
 		_add("plane", randf_range(45.0, 110.0), {"dir": _dir(), "spd": randf_range(45.0, 75.0), "par": randf_range(0.6, 0.8)})
 	for i in 2:
-		_add("satellite", randf_range(85.0, 180.0), {"dir": _dir(), "spd": randf_range(18.0, 30.0), "par": 0.5})
+		_add("satellite", randf_range(85.0, 180.0), {"dir": _dir(), "spd": randf_range(18.0, 30.0), "par": 0.85})
 	if randf() < 0.7:
-		_add("iss", randf_range(115.0, 195.0), {"dir": _dir(), "spd": randf_range(10.0, 18.0), "par": 0.5})
+		_add("iss", randf_range(115.0, 195.0), {"dir": _dir(), "spd": randf_range(10.0, 18.0), "par": 0.8})
 	if randf() < 0.5:   # 우주인 — 희귀
-		_add("astronaut", randf_range(135.0, 220.0), {"ph": randf() * TAU, "par": 0.55})
-	if randf() < 0.75:
-		_add("planet", randf_range(155.0, 260.0), {"col": _pick(_PLANET_COLS), "r": randf_range(60.0, 108.0), "ring": randf() < 0.5, "par": 0.2})
+		_add("astronaut", randf_range(135.0, 220.0), {"ph": randf() * TAU, "par": 0.9})
+	if randf() < 0.75:  # 행성은 멀어서 오래 보이지만 그래도 고공에서만
+		_add("planet", randf_range(155.0, 260.0), {"col": _pick(_PLANET_COLS), "r": randf_range(60.0, 108.0), "ring": randf() < 0.5, "par": 0.42})
 	if randf() < 0.22:  # UFO — 아주 희귀
-		_add("ufo", randf_range(120.0, 205.0), {"dir": _dir(), "spd": randf_range(28.0, 48.0), "par": 0.5})
+		_add("ufo", randf_range(120.0, 205.0), {"dir": _dir(), "spd": randf_range(28.0, 48.0), "par": 0.85})
 	for i in 2:
-		_add("shootingstar", randf_range(150.0, 320.0), {"ph": randf() * TAU, "period": randf_range(5.0, 10.0), "dir": _dir(), "par": 0.5})
+		_add("shootingstar", randf_range(150.0, 320.0), {"ph": randf() * TAU, "period": randf_range(5.0, 10.0), "dir": _dir(), "par": 0.7})
 
 
 ## 테스트용: 모든 종류를 알려진 고도에 하나씩 강제 배치(스샷 검증).
@@ -100,11 +100,11 @@ func force_all_env() -> void:
 	_add("birdflock", 45.0, {"n": 5, "dir": 1.0, "spd": 30.0, "par": 0.9})
 	_add("balloon", 66.0, {"col": _BAL_COLS[0], "rise": 0.0, "ph": 0.0, "par": 1.0})
 	_add("plane", 85.0, {"dir": 1.0, "spd": 0.0, "par": 0.7})
-	_add("satellite", 125.0, {"dir": 1.0, "spd": 0.0, "par": 0.5})
-	_add("iss", 132.0, {"dir": 1.0, "spd": 0.0, "par": 0.5})
-	_add("ufo", 150.0, {"dir": 1.0, "spd": 0.0, "par": 0.5})
-	_add("astronaut", 168.0, {"ph": 0.0, "par": 0.55})
-	_add("planet", 185.0, {"col": _PLANET_COLS[0], "r": 96.0, "ring": true, "par": 0.2})
+	_add("satellite", 125.0, {"dir": 1.0, "spd": 0.0, "par": 0.85})
+	_add("iss", 132.0, {"dir": 1.0, "spd": 0.0, "par": 0.8})
+	_add("ufo", 150.0, {"dir": 1.0, "spd": 0.0, "par": 0.85})
+	_add("astronaut", 168.0, {"ph": 0.0, "par": 0.9})
+	_add("planet", 185.0, {"col": _PLANET_COLS[0], "r": 96.0, "ring": true, "par": 0.42})
 	_add("shootingstar", 190.0, {"ph": 0.0, "period": 6.0, "dir": 1.0, "par": 0.5})
 
 
