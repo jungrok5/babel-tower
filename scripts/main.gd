@@ -839,7 +839,7 @@ func _make_type_tile(t: Dictionary) -> Button:
 	b.custom_minimum_size = Vector2(212, 172)
 	b.focus_mode = Control.FOCUS_NONE
 	b.pressed.connect(_choose_type.bind(t["id"]))
-	var icon := load("res://scripts/type_icon.gd").new()
+	var icon: Control = load("res://scripts/type_icon.gd").new()
 	icon.type_def = t
 	icon.position = Vector2(46, 14)
 	icon.size = Vector2(120, 112)
