@@ -7,7 +7,7 @@ extends Node2D
 enum State { CALIB, READY, OVER, SELECT }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v3.1 · items"
+const GAME_VERSION := "v3.2 · gen11"
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
@@ -67,6 +67,10 @@ var guides_group: Control
 var guide_btn: Button
 var gyro_btn: Button
 var select_panel: Control
+var lb_panel: Control                # 랭킹(리더보드) 오버레이
+var lb_rows: VBoxContainer           # 랭킹 행 목록
+var lb_title: Label
+var lb_view := 0                     # 랭킹에서 보고 있는 블록 타입 인덱스
 var calib_panel: Control
 var calib_label: Label
 var calib_button: Button
@@ -148,14 +152,15 @@ func _build_world() -> void:
 	floor_body.add_child(_make_rect_poly(Vector2(0, 8.0), Vector2(4200.0, 18.0),
 		Color(0.30, 0.45, 0.18)))                                  # 잔디(윗면)
 
-	# 초석(토대) — 피벗 바로 위, 바닥과 함께 기운다
+	# 초석(제단/기단) — 피벗 바로 위, 바닥과 함께 기운다. 블록이 아니라 '쌓는 받침대'로 보이게
+	# 돌 제단처럼 그린다(창세기/바벨 테마). 충돌은 안정적인 사각형 유지.
 	var fcs := CollisionShape2D.new()
 	var fshape := RectangleShape2D.new()
 	fshape.size = BLOCK_SIZE
 	fcs.shape = fshape
 	fcs.position = Vector2(0, -BLOCK_SIZE.y * 0.5)
 	floor_body.add_child(fcs)
-	floor_body.add_child(_make_rect_poly(Vector2(0, -BLOCK_SIZE.y * 0.5), BLOCK_SIZE, _brick_color(0)))
+	_build_pedestal(floor_body)
 
 	add_child(floor_body)
 
@@ -180,12 +185,17 @@ func _make_rect_poly(center: Vector2, size: Vector2, color: Color) -> Polygon2D:
 	return p
 
 
-
-func _brick_color(level: int) -> Color:
-	# 층마다 미묘하게 색을 달리해 쌓임을 시각적으로 구분
-	var base := Color(0.80, 0.73, 0.57)
-	var t := fmod(float(level) * 0.13, 1.0)
-	return base.lerp(Color(0.62, 0.55, 0.42), t)
+## 돌 제단(기단) 비주얼 — '블록'이 아니라 쌓아 올리는 받침대로 보이게. (충돌은 별도 사각형)
+func _build_pedestal(parent: Node) -> void:
+	var foot := Color(0.30, 0.29, 0.34)
+	var body := Color(0.40, 0.39, 0.45)
+	var cap := Color(0.50, 0.49, 0.55)
+	parent.add_child(_make_rect_poly(Vector2(0, -10.0), Vector2(232, 24), foot))   # 기단(맨 아래, 넓게)
+	parent.add_child(_make_rect_poly(Vector2(0, -33.0), Vector2(188, 50), body))   # 몸통
+	parent.add_child(_make_rect_poly(Vector2(-45.0, -33.0), Vector2(3, 50), body.darkened(0.25)))  # 이음새
+	parent.add_child(_make_rect_poly(Vector2(45.0, -33.0), Vector2(3, 50), body.darkened(0.25)))
+	parent.add_child(_make_rect_poly(Vector2(0, -59.0), Vector2(206, 16), cap))    # 윗판(블록 올리는 면)
+	parent.add_child(_make_rect_poly(Vector2(0, -65.0), Vector2(206, 4), cap.lightened(0.18)))  # 윗면 하이라이트
 
 
 # ---------------------------------------------------------------- 게임 흐름
@@ -798,6 +808,7 @@ func _build_ui() -> void:
 	ui.add_child(ver)
 
 	_build_select_panel()
+	_build_leaderboard_panel()
 	_build_calib_panel()
 	_build_over_panel()
 
@@ -813,6 +824,7 @@ func _build_select_panel() -> void:
 	box.add_theme_constant_override("separation", 26)
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	center.add_child(box)
+	box.add_child(_centered(_make_label("GENESIS 11", 32, Color(0.62, 0.66, 0.8))))
 	box.add_child(_centered(_make_label("무엇을 쌓을까요?", 50, Color(0.95, 0.92, 0.82))))
 	box.add_child(_centered(_make_label(
 		"블록마다 난이도와 최고 기록이 따로 관리됩니다", 26, Color(0.6, 0.63, 0.72))))
@@ -823,6 +835,8 @@ func _build_select_panel() -> void:
 	box.add_child(_centered(grid))
 	for t in BlockTypes.all():
 		grid.add_child(_make_type_tile(t))
+	box.add_child(_spacer(4))
+	box.add_child(_centered(_make_text_button("랭킹 보기", 30, Vector2(240, 66), _open_leaderboard)))
 	ui.add_child(select_panel)
 
 
@@ -844,6 +858,143 @@ func _make_type_tile(t: Dictionary) -> Button:
 	lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	b.add_child(lb)
+	return b
+
+
+# ---------------------------------------------------------------- 랭킹(리더보드)
+
+## 인게임 랭킹 화면. 지금은 목업 데이터, 나중에 Google Play Games에서 받아 채운다.
+func _build_leaderboard_panel() -> void:
+	lb_panel = _make_overlay(Color(0.03, 0.04, 0.07, 0.98))
+	lb_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	lb_panel.visible = false
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	lb_panel.add_child(center)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 14)
+	box.custom_minimum_size = Vector2(640, 0)
+	center.add_child(box)
+
+	# 헤더: ◀  랭킹 · [타입]  ▶
+	var header := HBoxContainer.new()
+	header.alignment = BoxContainer.ALIGNMENT_CENTER
+	header.add_theme_constant_override("separation", 18)
+	header.add_child(_make_text_button("<", 40, Vector2(70, 66), _lb_prev))
+	lb_title = _make_label("랭킹", 38, Color(0.98, 0.86, 0.4))
+	lb_title.custom_minimum_size = Vector2(360, 0)
+	lb_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	header.add_child(lb_title)
+	header.add_child(_make_text_button(">", 40, Vector2(70, 66), _lb_next))
+	box.add_child(header)
+
+	box.add_child(_lb_header_row())
+	lb_rows = VBoxContainer.new()
+	lb_rows.add_theme_constant_override("separation", 4)
+	box.add_child(lb_rows)
+
+	box.add_child(_spacer(10))
+	box.add_child(_centered(_make_text_button("닫기", 30, Vector2(240, 66), _close_leaderboard)))
+	ui.add_child(lb_panel)
+
+
+func _lb_header_row() -> Control:
+	var row := HBoxContainer.new()
+	row.custom_minimum_size = Vector2(600, 40)
+	var c := Color(0.55, 0.58, 0.66)
+	row.add_child(_lb_cell("순위", 24, c, 90, HORIZONTAL_ALIGNMENT_CENTER))
+	row.add_child(_lb_cell("이름", 24, c, 330, HORIZONTAL_ALIGNMENT_LEFT))
+	row.add_child(_lb_cell("높이", 24, c, 180, HORIZONTAL_ALIGNMENT_RIGHT))
+	return row
+
+
+func _lb_cell(text: String, fsize: int, color: Color, w: float, align: int) -> Label:
+	var l := _make_label(text, fsize, color)
+	l.custom_minimum_size = Vector2(w, 0)
+	l.horizontal_alignment = align
+	return l
+
+
+func _open_leaderboard() -> void:
+	lb_view = _type_index(current_type.get("id", "brick"))
+	_refresh_leaderboard()
+	ui.move_child(lb_panel, ui.get_child_count() - 1)   # 다른 패널 위로
+	lb_panel.visible = true
+
+
+func _close_leaderboard() -> void:
+	lb_panel.visible = false
+
+
+func _lb_prev() -> void:
+	lb_view = (lb_view + BlockTypes.all().size() - 1) % BlockTypes.all().size()
+	_refresh_leaderboard()
+
+
+func _lb_next() -> void:
+	lb_view = (lb_view + 1) % BlockTypes.all().size()
+	_refresh_leaderboard()
+
+
+func _type_index(id: String) -> int:
+	var all := BlockTypes.all()
+	for i in all.size():
+		if all[i]["id"] == id:
+			return i
+	return 0
+
+
+## 목업 랭킹을 다시 그린다. 내 최고 기록이 있으면 내 자리를 끼워 강조한다.
+func _refresh_leaderboard() -> void:
+	var t: Dictionary = BlockTypes.all()[lb_view]
+	lb_title.text = "랭킹 · %s" % t["name"]
+	for c in lb_rows.get_children():
+		c.queue_free()
+	var rows: Array = Leaderboard.entries(t["id"], Graveyard.best_for(t["id"]))
+	var me_row: Dictionary = {}
+	var count := 0
+	for e in rows:
+		if e["me"]:
+			me_row = e
+		if count < 8:
+			lb_rows.add_child(_lb_entry_row(e))
+			count += 1
+	# 내 기록이 top 8 밖이면 구분선과 함께 따로 표시
+	if not me_row.is_empty() and int(me_row["rank"]) > 8:
+		lb_rows.add_child(_lb_cell("...", 24, Color(0.5, 0.52, 0.6), 600, HORIZONTAL_ALIGNMENT_CENTER))
+		lb_rows.add_child(_lb_entry_row(me_row))
+
+
+func _lb_entry_row(e: Dictionary) -> Control:
+	var row := HBoxContainer.new()
+	row.custom_minimum_size = Vector2(600, 52)
+	var rank: int = e["rank"]
+	var col := Color(0.86, 0.87, 0.92)
+	if e["me"]:
+		col = Color(1.0, 0.84, 0.32)          # 내 기록 = 금색
+	elif rank == 1:
+		col = Color(1.0, 0.86, 0.45)
+	elif rank == 2:
+		col = Color(0.82, 0.85, 0.92)
+	elif rank == 3:
+		col = Color(0.86, 0.66, 0.45)
+	var name_txt: String = ("> " + str(e["name"]) + " (나)") if e["me"] else str(e["name"])
+	row.add_child(_lb_cell("%d" % rank, 30, col, 90, HORIZONTAL_ALIGNMENT_CENTER))
+	row.add_child(_lb_cell(name_txt, 30, col, 330, HORIZONTAL_ALIGNMENT_LEFT))
+	row.add_child(_lb_cell("%d m" % int(e["m"]), 30, col, 180, HORIZONTAL_ALIGNMENT_RIGHT))
+	return row
+
+
+## 텍스트 버튼 헬퍼
+func _make_text_button(text: String, fsize: int, min_size: Vector2, cb: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	if ui_font:
+		b.add_theme_font_override("font", ui_font)
+	b.add_theme_font_size_override("font_size", fsize)
+	b.custom_minimum_size = min_size
+	b.focus_mode = Control.FOCUS_NONE
+	b.pressed.connect(cb)
 	return b
 
 
@@ -915,25 +1066,9 @@ func _show_game_over() -> void:
 			line.strip_edges(), 26, Color(0.55, 0.5, 0.45))))
 
 	over_body.add_child(_spacer(20))
-	var retry := Button.new()
-	retry.text = "다시 쌓기"
-	if ui_font:
-		retry.add_theme_font_override("font", ui_font)
-	retry.add_theme_font_size_override("font_size", 38)
-	retry.custom_minimum_size = Vector2(280, 90)
-	retry.pressed.connect(_restart)
-	over_body.add_child(_centered(retry))
-
-	# 블록 바꾸기 — 선택 화면으로
-	var change := Button.new()
-	change.text = "블록 바꾸기"
-	if ui_font:
-		change.add_theme_font_override("font", ui_font)
-	change.add_theme_font_size_override("font_size", 30)
-	change.custom_minimum_size = Vector2(280, 72)
-	change.focus_mode = Control.FOCUS_NONE
-	change.pressed.connect(_restart_to_select)
-	over_body.add_child(_centered(change))
+	over_body.add_child(_centered(_make_text_button("다시 쌓기", 38, Vector2(280, 90), _restart)))
+	over_body.add_child(_centered(_make_text_button("랭킹 보기", 30, Vector2(280, 72), _open_leaderboard)))
+	over_body.add_child(_centered(_make_text_button("블록 바꾸기", 30, Vector2(280, 72), _restart_to_select)))
 
 	over_panel.visible = true
 

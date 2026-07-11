@@ -6,8 +6,8 @@ config_version=5
 
 [application]
 
-config/name="Babel Tower"
-config/description="기기를 최대한 움직이지 않고 탑을 쌓는 인내의 게임. 손이 떨리는 순간, 탑은 무너진다."
+config/name="Genesis 11"
+config/description="창세기 11장 — 기기를 최대한 움직이지 않고 탑을 쌓는 인내의 게임. 손이 떨리는 순간, 탑은 무너진다."
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"

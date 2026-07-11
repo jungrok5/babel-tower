@@ -21,6 +21,14 @@ func _ready() -> void:
 	await _settle(10)
 	await _shot("00_select")
 
+	# 랭킹 UI (목업) — 내 기록을 하나 넣어 강조(금색 '나' 행) 확인
+	Graveyard.by_type["brick"] = {"best": 400, "records": [400]}
+	main._open_leaderboard()
+	await _settle(8)
+	await _shot("00b_rank")
+	main._close_leaderboard()
+	Graveyard.by_type.erase("brick")   # 테스트 아티팩트 제거
+
 	main._choose_type("brick")         # 벽돌로 시작
 
 	# READY(보정 완료)까지 대기
