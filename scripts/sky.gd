@@ -248,8 +248,8 @@ func _draw_cirrus(pos: Vector2, sc: float, a: float) -> void:
 	# 부드럽고 옅은 권운 — 가로로 길게 늘어진 획 몇 개(겹치는 원 격자를 없애 눈부심 제거)
 	var col := Color(0.90, 0.94, 1.0, 0.14 * a)
 	for row in [-14.0, 0.0, 13.0]:
-		var y := pos.y + row * sc
-		var half := (120.0 + row) * sc
+		var y := pos.y + float(row) * sc
+		var half := (120.0 + float(row)) * sc
 		draw_line(Vector2(pos.x - half, y), Vector2(pos.x + half, y), col, 12.0 * sc)
 
 
