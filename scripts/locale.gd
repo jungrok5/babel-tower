@@ -73,6 +73,7 @@ const STRINGS := {
 		"blk_cone": "Cone", "blk_bottle": "Bottle", "blk_ball": "Ball",
 		"best_short": "Best", "dont_show": "Don't show again", "resume": "Resume",
 		"home": "Home", "how_to_replay": "How to play", "version": "Version",
+		"inspect_hint": "Drag to preview the sky · up to space",
 	},
 	"ko": {
 		"select_title": "무엇을 쌓을까요?",
@@ -119,6 +120,7 @@ const STRINGS := {
 		"blk_cone": "고깔", "blk_bottle": "병", "blk_ball": "공",
 		"best_short": "최고", "dont_show": "다음부터 안 보기", "resume": "계속하기",
 		"home": "홈", "how_to_replay": "조작법 보기", "version": "버전",
+		"inspect_hint": "드래그로 하늘 미리보기 · 우주까지",
 	},
 	"ja": {
 		"select_title": "何を積みますか？",
@@ -165,6 +167,7 @@ const STRINGS := {
 		"blk_cone": "コーン", "blk_bottle": "びん", "blk_ball": "ボール",
 		"best_short": "最高", "dont_show": "次回から表示しない", "resume": "続ける",
 		"home": "ホーム", "how_to_replay": "操作方法", "version": "バージョン",
+		"inspect_hint": "ドラッグで空をプレビュー · 宇宙まで",
 	},
 }
 

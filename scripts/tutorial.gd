@@ -59,8 +59,7 @@ func _process(dt: float) -> void:
 func _draw() -> void:
 	draw_rect(Rect2(0, 0, VW, VH), Color(0.03, 0.04, 0.07, 0.86))
 	if font:
-		draw_string(font, Vector2(0, 150), Locale.t("tut_title"), HORIZONTAL_ALIGNMENT_CENTER, VW, 56,
-			Color(0.96, 0.93, 0.83))
+		_text(Vector2(0, 150), Locale.t("tut_title"), VW, 56, Color(0.96, 0.93, 0.83), 7)
 
 	var ped := Vector2(360, 760)
 	_draw_pedestal(ped)
@@ -118,13 +117,17 @@ func _draw() -> void:
 		_draw_level_hint(Vector2(360.0, 430.0), wob)
 
 	if font:
-		draw_string(font, Vector2(24, 990), cap, HORIZONTAL_ALIGNMENT_CENTER, VW - 48, 32,
-			Color(0.86, 0.89, 0.96))
-		draw_string(font, Vector2(24, 1034), Locale.t("tut_hint"), HORIZONTAL_ALIGNMENT_CENTER,
-			VW - 48, 24, Color(0.55, 0.58, 0.66))
+		_text(Vector2(24, 990), cap, VW - 48, 32, Color(0.90, 0.93, 0.99), 5)
+		_text(Vector2(24, 1034), Locale.t("tut_hint"), VW - 48, 24, Color(0.62, 0.66, 0.74), 4)
 
 
 # ---------- 그리기 헬퍼 ----------
+
+## 외곽선 있는 가운데 정렬 텍스트(가독성)
+func _text(pos: Vector2, s: String, w: float, size: int, col: Color, outline: int) -> void:
+	draw_string_outline(font, pos, s, HORIZONTAL_ALIGNMENT_CENTER, w, size, outline,
+		Color(0.03, 0.04, 0.07, 0.9))
+	draw_string(font, pos, s, HORIZONTAL_ALIGNMENT_CENTER, w, size, col)
 
 func _draw_pedestal(c: Vector2) -> void:
 	var foot := Color(0.30, 0.29, 0.34)

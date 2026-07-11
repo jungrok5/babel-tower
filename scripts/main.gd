@@ -23,6 +23,11 @@ const MILESTONE_M := 50                              # 이 미터마다 돌파 �
 const WIND_LOW := 120                                # 이 높이부터 바람 발생
 const WIND_HIGH := 600                               # 이 높이 위(성층권)는 무풍
 const WIND_ANGLE := 0.13                             # 최대 바람이 바닥을 미는 각도(rad)
+# (개발용) 관찰 카메라: 지면에서 우주까지 자유 스크롤로 하늘을 미리 본다.
+const INSPECT_ZOOM := 0.72                           # 관찰 시 줌(세로로 넓게 보임)
+const INSPECT_BASE_Y := GROUND_TOP_Y - 300.0         # pan=0일 때 카메라 중심(지면이 하단에 보임)
+const INSPECT_MIN_PAN_Y := -10400.0                  # 위로 스크롤 한계(≈ 우주 900m)
+const INSPECT_DRAG := 2.6                            # 관찰 드래그 가속(우주까지 빠르게)
 
 var state: int = State.SELECT
 var score: int = 0
@@ -66,6 +71,7 @@ var best_label: Label
 var ingame_ui: Control               # 인게임 상단/개발 버튼 묶음
 var pause_btn: Button
 var inspect_btn: Button
+var inspect_hint: Label              # 관찰 모드 안내(+미리보기 고도)
 var pause_panel: Control             # 일시정지 메뉴
 var select_panel: Control
 var tutorial: Control                # 손 모양 조작 튜토리얼 오버레이
@@ -399,6 +405,12 @@ func _peak_meters() -> int:
 	return int(round(peak_px * METERS_PER_PX))
 
 
+## (개발용) 관찰 카메라가 지금 보고 있는 고도(미터) — 스크롤한 만큼 하늘이 바뀐다
+func _inspect_view_meters() -> float:
+	var cam_y := INSPECT_BASE_Y + inspect_pan.y
+	return maxf(0.0, (FOUNDATION_TOP - cam_y) * METERS_PER_PX)
+
+
 ## 블록이 바닥/탑에 닿는 순간 — 타격감 + 진행 체크(높이 갱신 반영).
 func _on_block_landed() -> void:
 	settling = null                     # 닿았다 → 다음 블록 허용
@@ -559,10 +571,13 @@ func _unhandled_input(event: InputEvent) -> void:
 					_toggle_inspect()
 		return
 
-	# 관찰 모드: 드래그로 카메라를 자유롭게 이동(탑 상단 확인). 낙하/조준 없음.
+	# 관찰 모드: 드래그로 화면을 위아래로 스크롤해 지면~우주까지 하늘을 미리 본다. 낙하/조준 없음.
+	# 직접 조작(월드를 손끝으로 끌기): 아래로 끌면 위(우주)가, 위로 끌면 아래(지면)가 보인다.
 	if inspect:
 		if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT):
-			inspect_pan += event.relative / cam.zoom.x
+			inspect_pan -= event.relative / cam.zoom.x * INSPECT_DRAG
+			inspect_pan.x = clampf(inspect_pan.x, -700.0, 700.0)
+			inspect_pan.y = clampf(inspect_pan.y, INSPECT_MIN_PAN_Y, 500.0)
 		return
 
 	# 첫 손가락(또는 마우스): 조준/낙하. (터치는 첫 손가락이 마우스로 에뮬레이션됨)
@@ -758,7 +773,8 @@ func _process(delta: float) -> void:
 	if state != State.READY:
 		wind_cur = lerpf(wind_cur, 0.0, 0.05)   # 플레이 중이 아니면 바람 잦아듦
 	if sky != null:
-		sky.meters = float(_meters())
+		# 관찰 모드에선 카메라 고도로 하늘을 미리보기(우주까지), 그 외엔 실제 탑 높이
+		sky.meters = _inspect_view_meters() if inspect else float(_meters())
 		sky.t = world_time
 		sky.wind = wind_cur
 	if wind_fx != null:
@@ -795,10 +811,12 @@ func _draw() -> void:
 	if best_m > 0:
 		var ry := FOUNDATION_TOP - float(best_m) / METERS_PER_PX
 		draw_dashed_line(Vector2(BASE_X - 420, ry), Vector2(BASE_X + 420, ry),
-			Color(1.0, 0.82, 0.3, 0.5), 3.0, 22.0)
+			Color(1.0, 0.82, 0.3, 0.8), 4.0, 22.0)
 		if ui_font:
-			draw_string(ui_font, Vector2(BASE_X - 400, ry - 14), "%s %d m" % [Locale.t("best_short"), best_m],
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1.0, 0.82, 0.3, 0.7))
+			var bt := "%s %d m" % [Locale.t("best_short"), best_m]
+			var bp := Vector2(BASE_X - 400, ry - 14)
+			draw_string_outline(ui_font, bp, bt, HORIZONTAL_ALIGNMENT_LEFT, -1, 28, 6, Color(0.04, 0.05, 0.09, 0.85))
+			draw_string(ui_font, bp, bt, HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1.0, 0.86, 0.4))
 
 	# 2) 조준 중일 때만: 회전을 반영한 실제 블록 모양 고스트 + 바닥까지 내려가는 낙하 컬럼
 	if aiming:
@@ -831,12 +849,9 @@ func _update_camera(delta: float) -> void:
 	var target: Vector2
 	var z: float
 	if inspect and state == State.READY:
-		# (개발용) 관찰: 지면~꼭대기 전체를 담고, 드래그 이동(inspect_pan) 반영
-		var tower_top_y := minf(_lowest_top(), GROUND_TOP_Y - 300.0)
-		var mid_y := (GROUND_TOP_Y + tower_top_y) * 0.5
-		var needed := (GROUND_TOP_Y - tower_top_y) + 400.0
-		z = clampf(1280.0 / needed, 0.08, 1.0)
-		target = Vector2(BASE_X, mid_y) + inspect_pan
+		# (개발용) 관찰: 지면(하단)에서 시작해 드래그로 자유롭게 위로 스크롤 → 우주까지 하늘 미리보기
+		z = INSPECT_ZOOM
+		target = Vector2(BASE_X, INSPECT_BASE_Y) + inspect_pan
 	elif state == State.OVER:
 		# 붕괴 시: 지면~꼭대기 전체가 보이도록 줌아웃 (무너지는 걸 다 볼 수 있게)
 		var tower_top_y := minf(_lowest_top(), GROUND_TOP_Y - 200.0)
@@ -863,12 +878,17 @@ func _update_camera(delta: float) -> void:
 
 
 func _update_ui(delta: float) -> void:
-	# 인게임 HUD는 플레이(READY) 중에만 보인다
+	# 인게임 HUD는 플레이(READY) 중에만 보인다. 관찰 모드에선 높이/최고 대신 미리보기 안내를 띄운다.
 	var playing := state == State.READY
-	height_label.visible = playing
-	best_label.visible = playing
 	ingame_ui.visible = playing
-	if playing:
+	height_label.visible = playing and not inspect
+	best_label.visible = playing and not inspect
+	if inspect_hint != null:
+		inspect_hint.visible = playing and inspect
+	if playing and inspect:
+		if inspect_hint != null:
+			inspect_hint.text = "%s   ·   ▲ %d m" % [Locale.t("inspect_hint"), int(_inspect_view_meters())]
+	elif playing:
 		height_label.text = "%d m" % _meters()
 		best_label.text = "%s %d m" % [Locale.t("best_short"),
 			maxi(Graveyard.best_for(current_type.get("id", "brick")), _peak_meters())]
@@ -935,6 +955,13 @@ func _build_ui() -> void:
 	inspect_btn.position = Vector2(20, 1174)
 	inspect_btn.modulate = Color(1, 1, 1, 0.5)
 	ingame_ui.add_child(inspect_btn)
+	# 관찰 모드 안내(+미리보기 고도) — 상단 중앙, 관찰 중에만
+	inspect_hint = _make_label("", 26, Color(0.97, 0.97, 1.0))
+	inspect_hint.position = Vector2(0, 120)
+	inspect_hint.size = Vector2(720, 40)
+	inspect_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inspect_hint.visible = false
+	ingame_ui.add_child(inspect_hint)
 
 	_build_select_panel()
 	_build_leaderboard_panel()
@@ -1537,6 +1564,9 @@ func _make_label(text: String, size: int, color: Color) -> Label:
 		l.add_theme_font_override("font", ui_font)
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", color)
+	# 어두운 외곽선 — 밝은 하늘 위에서도 글자가 또렷하게 보이도록(가독성)
+	l.add_theme_constant_override("outline_size", maxi(5, int(size * 0.16)))
+	l.add_theme_color_override("font_outline_color", Color(0.04, 0.05, 0.09, 0.9))
 	return l
 
 
