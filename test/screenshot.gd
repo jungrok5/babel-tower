@@ -96,7 +96,7 @@ func _ready() -> void:
 	main.inspect_pan.y = -266.0        # ~65m: 구름 가득 + 풍선/비행기/새떼
 	await _settle(70)
 	await _shot("04c_clouds")
-	main.inspect_pan.y = -770.0        # ~130m: 위성/우주정거장/UFO + 권운
+	main.inspect_pan.y = -770.0        # ~130m: 위성/우주정거장/우주인 + 권운
 	await _settle(70)
 	await _shot("04d_space_life")
 	main.inspect_pan.y = -1196.0       # ~185m: 우주인/행성/별/별똥별

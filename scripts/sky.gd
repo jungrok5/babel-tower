@@ -1,6 +1,6 @@
 extends Control
 ## 고도(미터)에 따라 스크롤하는 "살아있는 대기층" 배경.
-## 구름·별·환경요소(나비·새떼·풍선·비행기·위성·우주정거장·우주인·행성·UFO·별똥별)를
+## 구름·별·환경요소(나비·새떼·풍선·비행기·위성·우주정거장·우주인·행성·별똥별)를
 ## 각자의 고도에 배치하고, 현재 고도만큼 아래로 밀어 그린다(패럴랙스) → 올라갈수록 아래로 지나간다.
 ##
 ## 대기층 순서(아래→위, 미터):
@@ -13,7 +13,7 @@ extends Control
 ##   80~180 위성
 ##   105~150 성층권(권운)
 ##   100~   별
-##   110~200 우주정거장 · 우주인 · UFO(희귀)
+##   110~200 우주정거장 · 우주인(희귀)
 ##   150~   행성 · 별똥별 · 깊은 우주(칠흑)
 
 var meters: float = 0.0
@@ -87,8 +87,6 @@ func regen_env() -> void:
 		_add("astronaut", randf_range(135.0, 220.0), {"ph": randf() * TAU, "par": 0.9})
 	if randf() < 0.75:  # 행성은 멀어서 오래 보이지만 그래도 고공에서만
 		_add("planet", randf_range(155.0, 260.0), {"col": _pick(_PLANET_COLS), "r": randf_range(60.0, 108.0), "ring": randf() < 0.5, "par": 0.42})
-	if randf() < 0.22:  # UFO — 아주 희귀
-		_add("ufo", randf_range(120.0, 205.0), {"dir": _dir(), "spd": randf_range(28.0, 48.0), "par": 0.85})
 	for i in 2:
 		_add("shootingstar", randf_range(150.0, 320.0), {"ph": randf() * TAU, "period": randf_range(5.0, 10.0), "dir": _dir(), "par": 0.7})
 
@@ -102,7 +100,6 @@ func force_all_env() -> void:
 	_add("plane", 85.0, {"dir": 1.0, "spd": 0.0, "par": 0.7})
 	_add("satellite", 125.0, {"dir": 1.0, "spd": 0.0, "par": 0.85})
 	_add("iss", 132.0, {"dir": 1.0, "spd": 0.0, "par": 0.8})
-	_add("ufo", 150.0, {"dir": 1.0, "spd": 0.0, "par": 0.85})
 	_add("astronaut", 168.0, {"ph": 0.0, "par": 0.9})
 	_add("planet", 185.0, {"col": _PLANET_COLS[0], "r": 96.0, "ring": true, "par": 0.42})
 	_add("shootingstar", 190.0, {"ph": 0.0, "period": 6.0, "dir": 1.0, "par": 0.5})
@@ -149,13 +146,13 @@ func _draw() -> void:
 	for i in bands:
 		draw_rect(Rect2(0, VH * i / bands, VW, VH / bands + 1), top.lerp(bot, float(i) / float(bands - 1)))
 
-	# 먼 우주 배경(행성) → 별 → 우주 물체(위성/정거장/우주인/UFO/별똥별)
+	# 먼 우주 배경(행성) → 별 → 우주 물체(위성/정거장/우주인/별똥별)
 	for e in _env:
 		if e["kind"] == "planet":
 			_draw_env(e)
 	_draw_stars()
 	for e in _env:
-		if e["kind"] in ["satellite", "iss", "astronaut", "ufo", "shootingstar"]:
+		if e["kind"] in ["satellite", "iss", "astronaut", "shootingstar"]:
 			_draw_env(e)
 
 	# 해 (지상)
@@ -236,9 +233,6 @@ func _draw_env(e: Dictionary) -> void:
 			_draw_astronaut(Vector2(ax, y + sin(t * 0.5 + float(e["ph"])) * 14.0), sin(t * 0.2) * 0.25)
 		"planet":
 			_draw_planet(Vector2(float(e["x"]), y), float(e["r"]), e["col"], bool(e["ring"]))
-		"ufo":
-			var ux := wrapf(float(e["x"]) + t * float(e["spd"]) * float(e["dir"]), -180.0, VW + 180.0)
-			_draw_ufo(Vector2(ux, y + sin(t * 1.3) * 8.0))
 		"shootingstar":
 			_draw_shootingstar(e, y)
 
@@ -384,18 +378,6 @@ func _draw_planet(c: Vector2, r: float, col: Color, ring: bool) -> void:
 	if ring:
 		for rr in [r * 1.5, r * 1.62, r * 1.74]:
 			draw_arc(c, rr, 0.0, TAU, 60, Color(0.85, 0.82, 0.7, 0.5), 2.5)
-
-
-## UFO — 접시 + 돔 + 아래 불빛
-func _draw_ufo(c: Vector2) -> void:
-	draw_circle(c + Vector2(0, 4), 10.0, Color(0.6, 0.95, 0.7, 0.25))   # 광선 후광
-	var disc := Color(0.62, 0.66, 0.74)
-	draw_colored_polygon(PackedVector2Array([Vector2(c.x - 34, c.y), Vector2(c.x, c.y - 9), Vector2(c.x + 34, c.y), Vector2(c.x, c.y + 9)]), disc)
-	draw_polyline(PackedVector2Array([Vector2(c.x - 34, c.y), Vector2(c.x, c.y - 9), Vector2(c.x + 34, c.y), Vector2(c.x, c.y + 9), Vector2(c.x - 34, c.y)]), OUTLINE, 1.6)
-	draw_circle(c + Vector2(0, -6), 12.0, Color(0.55, 0.85, 0.95, 0.9))  # 돔
-	draw_arc(c + Vector2(0, -6), 12.0, 0, TAU, 20, OUTLINE, 1.6)
-	for k in [-20.0, -7.0, 7.0, 20.0]:
-		draw_circle(c + Vector2(k, 3), 2.4, Color(1.0, 0.9, 0.4, 0.5 + 0.5 * sin(t * 6.0 + k)))
 
 
 ## 별똥별 — 주기적으로 대각선으로 지나감
