@@ -161,13 +161,20 @@ func _build_melon() -> void:
 	shp.radius = r
 	cs.shape = shp
 	melon.add_child(cs)
+	# 윗면 평평한 받침 — 둥근 참외 위에도 블록/동전이 얹히도록 작은 플랫폼
+	var topcs := CollisionShape2D.new()
+	var tshape := RectangleShape2D.new()
+	tshape.size = Vector2(70.0, 12.0)
+	topcs.shape = tshape
+	topcs.position = Vector2(0, -r + 4.0)
+	melon.add_child(topcs)
 	var mat := PhysicsMaterial.new()
-	mat.friction = 0.9
+	mat.friction = 1.0
 	mat.bounce = 0.0
 	melon.physics_material_override = mat
-	melon.mass = 1.8
+	melon.mass = 1.7
 	melon.linear_damp = 2.8
-	melon.angular_damp = 5.5
+	melon.angular_damp = 7.0
 	melon.gravity_scale = 1.0
 	melon.can_sleep = false
 	# 참외 비주얼(노랑 몸통 + 세로 줄무늬 + 꼭지 + 하이라이트)
@@ -186,8 +193,9 @@ func _build_melon() -> void:
 	_samples = 7
 	_half_w = 58.0
 	_keel = r
-	_buoy_k = 5.0
-	_buoy_k2 = 0.9
+	_buoy_k = 8.0
+	_buoy_k2 = 1.2
+	_center_k = 12.0
 	base_line_y = 958.0 - r + 12.0
 	_kill_y = WATER_Y
 
@@ -209,9 +217,9 @@ func _build_raft() -> void:
 	mat.friction = 0.95
 	mat.bounce = 0.0
 	raft.physics_material_override = mat
-	raft.mass = 2.4
+	raft.mass = 2.2
 	raft.linear_damp = 2.8
-	raft.angular_damp = 6.5
+	raft.angular_damp = 8.0
 	raft.gravity_scale = 1.0
 	raft.can_sleep = false
 	# 통나무 뗏목 비주얼
@@ -228,8 +236,9 @@ func _build_raft() -> void:
 	_samples = 9
 	_half_w = hw - 16.0
 	_keel = hh
-	_buoy_k = 6.0
-	_buoy_k2 = 0.7
+	_buoy_k = 12.0
+	_buoy_k2 = 1.1
+	_center_k = 14.0
 	base_line_y = 992.0 - hh - 12.0
 	_kill_y = WATER_Y
 
