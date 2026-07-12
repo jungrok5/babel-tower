@@ -238,6 +238,19 @@ static func _builtins() -> Array:
 				{"kind": "circle", "pos": Vector2(0, 0), "r": 56.0, "color": Color(0.88, 0.30, 0.26)},
 			],
 		},
+		{
+			# 동전 — 납작하고 가벼운 금화(물 위 참외에 얹기 좋음). 살짝 구른다.
+			"id": "coin", "name": "동전", "i18n": "blk_coin", "friction": 0.5, "mass": 0.9,
+			"parts": [
+				{"kind": "poly", "pts": PackedVector2Array([
+					Vector2(-52, -6), Vector2(-40, -15), Vector2(40, -15), Vector2(52, -6),
+					Vector2(52, 6), Vector2(40, 15), Vector2(-40, 15), Vector2(-52, 6)]),
+					"color": Color(0.93, 0.78, 0.30)},
+				{"kind": "poly", "pts": PackedVector2Array([
+					Vector2(-40, -15), Vector2(40, -15), Vector2(40, -9), Vector2(-40, -9)]),
+					"color": Color(0.99, 0.90, 0.52)},
+			],
+		},
 	]
 
 

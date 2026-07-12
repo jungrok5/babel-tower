@@ -1,28 +1,25 @@
 extends Node2D
 ## Babel Tower — 메인 게임 매니저
 ##
-## 핵심 규칙: 기기를 최대한 움직이지 마라.
-## 흔들리면 탑이 요동치고, 높이 올라갈수록 작은 떨림도 치명적이 된다.
+## 자이로 없이, 선택한 "바닥(base)"의 물리로 쌓는다.
+## 바닥마다(땅/물 위 참외/시소/뗏목) 흔들림·기울기가 달라 난이도가 다르다.
 
-enum State { CALIB, READY, OVER, SELECT, TUTORIAL }
+enum State { BASE_SELECT, READY, OVER, SELECT, TUTORIAL }
 
 ## 화면에 표시되는 빌드 버전 — 캐시된 옛 빌드인지 확인용. 변경 시마다 올린다.
-const GAME_VERSION := "v3.5"
+const GAME_VERSION := "v4.0 · bases"
 const ROTATE_STEP := PI * 0.25       # 두 손가락 탭 1회 = 45°
 
 const BASE_X := 360.0
 const GROUND_TOP_Y := 1050.0
-const BLOCK_SIZE := Vector2(180.0, 62.0)             # 토대(초석) 크기 · 기준 단위
+const BLOCK_SIZE := Vector2(180.0, 62.0)             # 기준 단위(벽돌 크기)
 const DROP_HEIGHT := 150.0          # 다음 블록이 떨어지기 시작하는 높이(짧게 = 연사 쌓기 쾌감)
-const MAX_TILT_ANGLE := 0.52        # 최대 기울임에서 바닥(판자)이 기우는 각도(라디안 ~30°)
-const FOUNDATION_TOP := GROUND_TOP_Y - BLOCK_SIZE.y   # 토대 윗면 Y (수평일 때)
-const TILT_DEADZONE := 0.06         # 이보다 작은 기울기는 무시(미세 손떨림 → 떨림 방지)
-const FLOOR_PIVOT := Vector2(BASE_X, GROUND_TOP_Y)    # 바닥 회전 피벗(토대 중심 바닥)
-const METERS_PER_PX := 8.0 / BLOCK_SIZE.y            # 실제 높이 → 미터 환산(벽돌 1개 = 8m, 고공까지 도달 쉽게)
+const FOUNDATION_TOP := GROUND_TOP_Y - BLOCK_SIZE.y   # 땅 제단 윗면 Y
+const METERS_PER_PX := 8.0 / BLOCK_SIZE.y            # 실제 높이 → 미터 환산(벽돌 1개 = 8m)
 const MILESTONE_M := 50                              # 이 미터마다 돌파 이펙트
 const WIND_LOW := 40                                 # 이 높이부터 바람 발생
 const WIND_HIGH := 260                               # 이 높이 위(성층권)는 무풍
-const WIND_ANGLE := 0.13                             # 최대 바람이 바닥을 미는 각도(rad)
+const WIND_FORCE := 240.0            # 바람이 블록을 옆으로 미는 힘(고공일수록 강하게 체감)
 # (개발용) 관찰 카메라: 지면에서 우주까지 자유 스크롤로 하늘을 미리 본다.
 const INSPECT_ZOOM := 0.72                           # 관찰 시 줌(세로로 넓게 보임)
 const INSPECT_BASE_Y := GROUND_TOP_Y - 300.0         # pan=0일 때 카메라 중심(지면이 하단에 보임)
@@ -32,12 +29,11 @@ const INSPECT_DRAG := 2.6                            # 관찰 드래그 가속(�
 var state: int = State.SELECT
 var score: int = 0
 var blocks: Array[Block] = []
-var current_type: Dictionary = {}   # 선택한 블록 타입(벽돌/상자/책상/의자/공)
+var current_type: Dictionary = {}   # 선택한 블록 타입(벽돌/상자/…)
+var current_base: Dictionary = {}   # 선택한 바닥 타입(땅/참외/시소/뗏목)
+var base: TowerBase = null          # 현재 바닥 물리 리그
 var peak_px: float = 0.0            # 이번 판에서 도달한 최고 실제 높이(px)
-var calib_timer: float = 0.0
 var go_shake: float = 0.0           # 붕괴 순간의 카메라 흔들림 버스트
-var web_permission_asked := false
-var floor_body: AnimatableBody2D    # 센서에 따라 좌우로 움직이는 물리 바닥(+토대)
 var aiming := false                 # 손을 대고 위치를 조준 중인가
 var aim_x := BASE_X                 # 떨어뜨릴 가로 위치(월드 좌표)
 var aim_rot := 0.0                  # 놓을 블록의 회전(두 손가락 탭으로 90°씩)
@@ -79,6 +75,8 @@ var tut_from_select := false         # 선택화면 '조작법'으로 열었는�
 var lb_panel: Control                # 랭킹(리더보드) 오버레이
 var lb_rows: VBoxContainer           # 랭킹 행 목록
 var lb_title: Label
+var lb_base_label: Label             # 랭킹에서 보는 바닥 이름
+var lb_block_label: Label            # 랭킹에서 보는 블록 이름
 var lb_view := 0                     # 랭킹에서 보고 있는 블록 타입 인덱스
 var lb_icon: Control                 # 랭킹 헤더의 블록 미리보기 아이콘
 var settings_panel: Control          # 설정 오버레이
@@ -88,10 +86,8 @@ var lang_rows: VBoxContainer         # 언어 목록
 var lang_search: LineEdit            # 언어 검색창
 var record_img: Image = null         # 최고기록 갱신 순간의 스크린샷
 var _want_capture := false           # 다음 프레임에 기록 스크린샷 캡처
-var calib_panel: Control
-var calib_label: Label
-var calib_button: Button
-var awaiting_sensor: bool = false
+var base_panel: Control              # 바닥 선택 오버레이
+var lb_base := 0                     # 랭킹에서 보고 있는 바닥 인덱스
 var over_panel: Control
 var over_body: VBoxContainer
 var ui_font: Font
@@ -100,6 +96,7 @@ var ui_font: Font
 func _ready() -> void:
 	randomize()
 	current_type = BlockTypes.get_type("brick")   # 선택 전 기본값
+	current_base = BaseTypes.get_type("ground")   # 기본 바닥
 	_build_environment()
 	_build_world()
 	_build_ui()
@@ -148,45 +145,7 @@ func _play(name: String, pitch_var := 0.0) -> void:
 # ---------------------------------------------------------------- 월드 구성
 
 func _build_world() -> void:
-	# 센서에 따라 '기우는(경사)' 물리 바닥(판자). 중력은 항상 아래로 고정.
-	# 바닥이 기울면 그 위 블록들이 경사 때문에 넘어진다(= 판자를 기울이는 것).
-	# 피벗(원점)을 토대 중심 바닥에 두고, 자식들은 그 기준 상대 좌표로 배치한다.
-	floor_body = AnimatableBody2D.new()
-	floor_body.sync_to_physics = true
-	floor_body.position = FLOOR_PIVOT
-	var fmat := PhysicsMaterial.new()
-	fmat.friction = 1.0
-	fmat.bounce = 0.0
-	floor_body.physics_material_override = fmat
-
-	# 바닥판 (피벗 아래) — 넓게
-	var gcs := CollisionShape2D.new()
-	var gshape := RectangleShape2D.new()
-	gshape.size = Vector2(4200.0, 200.0)
-	gcs.shape = gshape
-	gcs.position = Vector2(0, 100.0)
-	floor_body.add_child(gcs)
-	floor_body.add_child(_make_rect_poly(Vector2(0, 1000.0), Vector2(4200.0, 2000.0),
-		Color(0.34, 0.24, 0.14)))                                  # 흙(줌아웃에도 하늘 안 비치게 깊게)
-	floor_body.add_child(_make_rect_poly(Vector2(0, 22.0), Vector2(4200.0, 26.0),
-		Color(0.26, 0.40, 0.16)))                                  # 잔디 아래 진한 경계
-	floor_body.add_child(_make_rect_poly(Vector2(0, 6.0), Vector2(4200.0, 14.0),
-		Color(0.36, 0.56, 0.22)))                                  # 잔디(윗면, 밝게)
-
-	# 초석(제단/기단) — 피벗 바로 위, 바닥과 함께 기운다. 블록이 아니라 '쌓는 받침대'로 보이게
-	# 돌 제단처럼 그린다(창세기/바벨 테마). 충돌은 안정적인 사각형 유지.
-	var fcs := CollisionShape2D.new()
-	var fshape := RectangleShape2D.new()
-	fshape.size = BLOCK_SIZE
-	fcs.shape = fshape
-	fcs.position = Vector2(0, -BLOCK_SIZE.y * 0.5)
-	floor_body.add_child(fcs)
-	_build_pedestal(floor_body)
-	_build_ground_decor(floor_body)
-
-	add_child(floor_body)
-
-	# 카메라
+	# 카메라만 여기서. 물리 바닥(base)은 선택 후 _build_base()에서 구성한다.
 	cam = Camera2D.new()
 	cam.position = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
 	cam.zoom = Vector2.ONE
@@ -195,73 +154,13 @@ func _build_world() -> void:
 	cam.make_current()
 
 
-## 사각형 Polygon2D 생성 헬퍼(중심/크기/색)
-func _make_rect_poly(center: Vector2, size: Vector2, color: Color) -> Polygon2D:
-	var p := Polygon2D.new()
-	var hw := size.x * 0.5
-	var hh := size.y * 0.5
-	p.polygon = PackedVector2Array([
-		center + Vector2(-hw, -hh), center + Vector2(hw, -hh),
-		center + Vector2(hw, hh), center + Vector2(-hw, hh)])
-	p.color = color
-	return p
-
-
-## 돌 제단(기단) 비주얼 — '블록'이 아니라 쌓아 올리는 받침대로 보이게. (충돌은 별도 사각형)
-func _build_pedestal(parent: Node) -> void:
-	var foot := Color(0.30, 0.29, 0.34)
-	var body := Color(0.40, 0.39, 0.45)
-	var cap := Color(0.50, 0.49, 0.55)
-	parent.add_child(_make_rect_poly(Vector2(0, -10.0), Vector2(232, 24), foot))   # 기단(맨 아래, 넓게)
-	parent.add_child(_make_rect_poly(Vector2(0, -33.0), Vector2(188, 50), body))   # 몸통
-	parent.add_child(_make_rect_poly(Vector2(-45.0, -33.0), Vector2(3, 50), body.darkened(0.25)))  # 이음새
-	parent.add_child(_make_rect_poly(Vector2(45.0, -33.0), Vector2(3, 50), body.darkened(0.25)))
-	parent.add_child(_make_rect_poly(Vector2(0, -59.0), Vector2(206, 16), cap))    # 윗판(블록 올리는 면)
-	parent.add_child(_make_rect_poly(Vector2(0, -65.0), Vector2(206, 4), cap.lightened(0.18)))  # 윗면 하이라이트
-
-
-## 카툰 지면 장식 — 잔디 포기·덤불·바위 (바닥과 함께 기운다). 제단 주변을 채워 완성도↑
-func _build_ground_decor(parent: Node) -> void:
-	var leaf := Color(0.34, 0.58, 0.24)
-	var leaf_hi := Color(0.46, 0.70, 0.30)
-	var rock := Color(0.55, 0.56, 0.63)
-	# 덤불 — 원 뭉치(제단 양옆 멀찍이)
-	for bx in [-300.0, 320.0]:
-		for o in [Vector2(-26, -4), Vector2(26, -4), Vector2(0, -22), Vector2(-48, 2), Vector2(48, 2)]:
-			parent.add_child(_make_circle_poly(Vector2(bx, -14) + o, 26.0, leaf))
-		parent.add_child(_make_circle_poly(Vector2(bx - 10, -30), 15.0, leaf_hi))
-	# 바위 — 둥근 육각 돌덩이
-	for rx in [-190.0, 230.0]:
-		parent.add_child(_make_circle_poly(Vector2(rx, -10), 22.0, rock, 6))
-		parent.add_child(_make_circle_poly(Vector2(rx - 6, -16), 9.0, rock.lightened(0.18), 6))
-	# 잔디 포기 — 뾰족한 삼각 잎(지면 윗면을 따라 흩뿌림)
-	var xs := [-460.0, -360.0, -120.0, -70.0, 90.0, 150.0, 400.0, 470.0]
-	for gx in xs:
-		_add_grass_tuft(parent, gx, leaf, leaf_hi)
-
-
-## 원을 근사한 Polygon2D (덤불·바위용). seg=꼭짓점 수(작을수록 각진 돌).
-func _make_circle_poly(center: Vector2, r: float, color: Color, seg: int = 16) -> Polygon2D:
-	var p := Polygon2D.new()
-	var pts := PackedVector2Array()
-	for i in seg:
-		var a := TAU * float(i) / float(seg)
-		pts.append(center + Vector2(cos(a), sin(a)) * r)
-	p.polygon = pts
-	p.color = color
-	return p
-
-
-## 잔디 한 포기 — 뾰족한 잎 세 갈래
-func _add_grass_tuft(parent: Node, x: float, col: Color, hi: Color) -> void:
-	var base_y := 2.0
-	for dx in [-9.0, 0.0, 9.0]:
-		var blade := Polygon2D.new()
-		var tip := Vector2(x + dx * 1.6, base_y - 26.0 - absf(dx) * 0.4)
-		blade.polygon = PackedVector2Array([
-			Vector2(x + dx - 5, base_y), Vector2(x + dx + 5, base_y), tip])
-		blade.color = hi if dx == 0.0 else col
-		parent.add_child(blade)
+## 선택한 바닥으로 물리 리그를 (재)구성한다. 배경 위·블록 아래에 렌더된다.
+func _build_base() -> void:
+	if base != null and is_instance_valid(base):
+		base.queue_free()
+	base = TowerBase.new()
+	add_child(base)
+	base.setup(current_base.get("kind", "ground"))
 
 
 # ---------------------------------------------------------------- 게임 흐름
@@ -270,15 +169,36 @@ func _add_grass_tuft(parent: Node, x: float, col: Color, hi: Color) -> void:
 func _begin_selection() -> void:
 	state = State.SELECT
 	select_panel.visible = true
-	calib_panel.visible = false
+	base_panel.visible = false
 	over_panel.visible = false
 
 
-## 블록 타입 선택 → 보정으로 진행 (첫 조작법 튜토리얼은 보정 완료 후 뜬다)
+## 블록 타입 선택 → 바닥 선택 화면으로
 func _choose_type(id: String) -> void:
 	current_type = BlockTypes.get_type(id)
 	select_panel.visible = false
-	_begin_calibration()
+	state = State.BASE_SELECT
+	ui.move_child(base_panel, ui.get_child_count() - 1)
+	base_panel.visible = true
+
+
+## 바닥 선택 → 판 시작
+func _choose_base(id: String) -> void:
+	current_base = BaseTypes.get_type(id)
+	base_panel.visible = false
+	_start_run()
+
+
+## 바닥·블록이 정해진 뒤 실제 판을 시작(첫 플레이면 조작법 튜토리얼 먼저)
+func _start_run() -> void:
+	_build_base()
+	_reset_play_vars()
+	over_panel.visible = false
+	if not Graveyard.tutorial_seen:
+		tut_from_select = false
+		_begin_tutorial()
+	else:
+		state = State.READY
 
 
 ## 설정에서 '조작법 다시 보기'
@@ -291,7 +211,7 @@ func _replay_tutorial() -> void:
 func _begin_tutorial() -> void:
 	state = State.TUTORIAL
 	select_panel.visible = false
-	calib_panel.visible = false
+	base_panel.visible = false
 	over_panel.visible = false
 	if tutorial == null:
 		tutorial = load("res://scripts/tutorial.gd").new()
@@ -316,31 +236,41 @@ func _on_tutorial_done(dont_show: bool) -> void:
 		state = State.READY
 
 
-func _begin_calibration() -> void:
-	state = State.CALIB
-	calib_panel.visible = true
-	over_panel.visible = false
-	# 웹: 사용자가 "센서 켜기"를 눌러야 모션 권한 요청 + 보정 시작 (iOS 제스처 요건)
-	if OS.has_feature("web") and not web_permission_asked:
-		awaiting_sensor = true
-		calib_button.visible = true
-	else:
-		# 네이티브(Android/iOS 앱)/재보정: 곧바로 보정 시작
-		_start_calibration_countdown()
-
-
-func _start_calibration_countdown() -> void:
-	awaiting_sensor = false
-	calib_button.visible = false
-	calib_timer = 1.6
-	Motion.start_calibration(calib_timer)
-
-
-func _on_sensor_enable() -> void:
-	if not web_permission_asked:
-		web_permission_asked = true
-		Motion.request_web_permission()
-	_start_calibration_countdown()
+## 판 시작/재시작 공통: 블록·점수·카메라·바람·새 초기화(바닥은 별도로 (재)구성)
+func _reset_play_vars() -> void:
+	for b in blocks:
+		if is_instance_valid(b):
+			b.queue_free()
+	blocks.clear()
+	score = 0
+	peak_px = 0.0
+	aiming = false
+	settling = null
+	aim_x = BASE_X
+	aim_rot = 0.0
+	mod_index = -1
+	last_milestone = 0
+	record_broken = false
+	record_saved = false
+	record_img = null
+	_want_capture = false
+	inspect = false
+	inspect_pan = Vector2.ZERO
+	if inspect_btn != null:
+		inspect_btn.modulate = Color(1, 1, 1, 0.5)
+	wind_cur = 0.0
+	wind_target = 0.0
+	wind_gusting = false
+	wind_timer = randf_range(4.0, 8.0)
+	bird_timer = randf_range(6.0, 10.0)
+	if is_instance_valid(bird):
+		bird.queue_free()
+	bird = null
+	cam.offset = Vector2.ZERO
+	cam.zoom = Vector2.ONE
+	cam.position = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
+	if sky != null:
+		sky.regen_env()
 
 
 ## 지정한 가로 위치(at_x) 위에서 선택한 타입의 블록을 떨어뜨린다.
@@ -390,9 +320,10 @@ func _can_drop() -> bool:
 	return settling == null or not is_instance_valid(settling)
 
 
-## 안착된 탑의 실제 높이(px) — 낙하 중(미착지)인 블록은 제외
+## 안착된 탑의 실제 높이(px) — 바닥 지지면 기준. 낙하 중(미착지)인 블록은 제외
 func _height_px() -> float:
-	return maxf(0.0, FOUNDATION_TOP - _tower_top_edge())
+	var line := base.base_line_y if base != null else FOUNDATION_TOP
+	return maxf(0.0, line - _tower_top_edge())
 
 
 ## 현재 실제 높이(미터)
@@ -403,6 +334,11 @@ func _meters() -> int:
 ## 이번 판 최고 도달 높이(미터)
 func _peak_meters() -> int:
 	return int(round(peak_px * METERS_PER_PX))
+
+
+## 랭킹/기록 키 — 바닥×블록 조합별로 따로 관리
+func _rank_key() -> String:
+	return "%s:%s" % [current_base.get("id", "ground"), current_type.get("id", "brick")]
 
 
 ## (개발용) 관찰 카메라가 지금 보고 있는 고도(미터) — 스크롤한 만큼 하늘이 바뀐다
@@ -430,7 +366,7 @@ func _check_progress() -> void:
 		_vibe(35)
 		_play("milestone")
 	# 자기 최고 높이를 넘으면(첫 판 포함) 그 순간을 캡처해 결과 공유에 쓴다.
-	var best := Graveyard.best_for(current_type.get("id", "brick"))
+	var best := Graveyard.best_for(_rank_key())
 	if not record_saved and _peak_meters() > best:
 		record_saved = true
 		_want_capture = true            # 이 순간 스크린샷 캡처(다음 프레임)
@@ -486,7 +422,7 @@ func _game_over() -> void:
 	bird = null
 	_play("collapse")
 	_vibe(400)                          # 붕괴의 햅틱
-	Graveyard.add_record(current_type.get("id", "brick"), _peak_meters())
+	Graveyard.add_record(_rank_key(), _peak_meters())
 	# 완전히 다 무너지는 장면(줌아웃)을 끝까지 보여준 뒤 결과 화면을 띄운다
 	await _wait_collapse_settled()
 	if state == State.OVER:             # 그 사이 재시작하지 않았다면
@@ -512,44 +448,10 @@ func _wait_collapse_settled() -> void:
 			break
 
 
+## 같은 바닥·블록으로 다시 (붕괴화면 '다시 쌓기')
 func _restart() -> void:
-	for b in blocks:
-		if is_instance_valid(b):
-			b.queue_free()
-	blocks.clear()
-	score = 0
-	peak_px = 0.0
-	aiming = false
-	settling = null
-	aim_x = BASE_X
-	aim_rot = 0.0
-	mod_index = -1
-	last_milestone = 0
-	record_broken = false
-	record_saved = false
-	record_img = null
-	_want_capture = false
-	inspect = false
-	inspect_pan = Vector2.ZERO
-	if inspect_btn != null:
-		inspect_btn.modulate = Color(1, 1, 1, 0.5)
-	wind_cur = 0.0
-	wind_target = 0.0
-	wind_gusting = false
-	wind_timer = randf_range(4.0, 8.0)
-	bird_timer = randf_range(6.0, 10.0)
-	if is_instance_valid(bird):
-		bird.queue_free()
-	bird = null
-	cam.offset = Vector2.ZERO
-	cam.zoom = Vector2.ONE
-	cam.position = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
-	if is_instance_valid(floor_body):
-		floor_body.rotation = 0.0            # 바닥을 수평으로 (토대는 바닥의 일부라 유지됨)
-		floor_body.position = FLOOR_PIVOT
-
-	if sky != null:
-		sky.regen_env()                      # 판마다 환경요소(풍선·위성·우주인 등) 새로 뿌림
+	_build_base()           # 바닥(물/시소 등) 물리 리셋
+	_reset_play_vars()
 	over_panel.visible = false
 	state = State.READY
 
@@ -636,22 +538,15 @@ func _clamp_aim(x: float) -> float:
 # ---------------------------------------------------------------- 물리
 
 func _physics_process(delta: float) -> void:
-	# 센서 기울기만큼 바닥(판자)을 기울인다(경사). 중력은 항상 아래로 고정.
-	# 바닥이 수평이면 블록은 잠들어(sleep) 떨림이 없다. 기울면 경사 때문에 위 블록이 넘어진다.
-	var target_angle := 0.0
+	# 자이로 없음. 바닥(base)은 자체 물리(부력/시소)로 흔들리고, 바람은 블록을 옆으로 민다.
 	if inspect:
-		# (개발용) 관찰 모드: 바닥을 수평 고정하고 바람도 잦아들게 한다(안정화)
-		wind_cur = lerpf(wind_cur, 0.0, 0.1)
-	else:
-		target_angle = _tilt_amount() * MAX_TILT_ANGLE
-		if state == State.READY:
-			_update_wind(delta)             # 간헐적 돌풍(고도 구간에서만) → 바닥을 민다
-			target_angle += wind_cur * WIND_ANGLE
-	if is_instance_valid(floor_body):
-		floor_body.rotation = lerpf(floor_body.rotation, target_angle, 0.15)
-
+		wind_cur = lerpf(wind_cur, 0.0, 0.1)   # 관찰 중엔 바람 잦아듦
 	if state != State.READY:
 		return
+
+	_update_wind(delta)
+	if not inspect and absf(wind_cur) > 0.02:
+		_apply_wind_force()
 
 	peak_px = maxf(peak_px, _height_px())
 	_update_birds(delta)
@@ -720,39 +615,33 @@ func _update_wind(dt: float) -> void:
 	wind_cur = lerpf(wind_cur, wind_target * band, 0.05)
 
 
-## 데드존을 적용한 기울기(작은 손떨림은 무시). -1..1
-func _tilt_amount() -> float:
-	if state != State.READY:
-		return 0.0
-	var raw := Motion.get_sway()
-	if absf(raw) <= TILT_DEADZONE:
-		return 0.0
-	return signf(raw) * (absf(raw) - TILT_DEADZONE) / (1.0 - TILT_DEADZONE)
-
-
-func _check_collapse() -> void:
-	# 붕괴 판정 = '블록이 지면(흙 윗면)에 닿음'. 기울어져 있어도 안 떨어졌으면 살아있다.
-	# 중요: 바닥(토대)이 통째로 기울면 그 위 블록도 함께 기운다. 이때 '세계 기준 수평선'과
-	# 블록의 '절대 회전'으로 판정하면, 멀쩡히 토대에 얹힌 블록도 죽는 오판이 난다.
-	# → 기울어진 '바닥 로컬 좌표'에서, 바닥에 대한 '상대 회전'으로 최저점을 계산한다.
-	# 바닥 피벗(FLOOR_PIVOT)이 지면 윗면이므로 로컬 y=0이 지면. 얹힌 블록은 음수(위)로 유지된다.
-	if not is_instance_valid(floor_body):
-		return
-	var floor_rot := floor_body.global_rotation
+## 바람이 블록을 옆으로 미는 힘(고공일수록 강하게 체감) — 자이로 대체 난이도
+func _apply_wind_force() -> void:
+	var line := base.base_line_y if base != null else FOUNDATION_TOP
 	for b in blocks:
 		if not is_instance_valid(b):
 			continue
-		var lp := floor_body.to_local(b.global_position)          # 기울어진 바닥 기준 좌표
-		var rel := b.global_rotation - floor_rot                   # 바닥에 대한 상대 회전(얹힌 블록 ≈ 0)
-		var ext := 0.5 * (absf(b.bbox.x * sin(rel)) + absf(b.bbox.y * cos(rel)))
-		if lp.y + ext > -6.0:                                      # 최저점이 지면(로컬 y=0)에 닿음
+		var hf := clampf((line - b.position.y) / 700.0, 0.0, 1.0)   # 높을수록 강하게
+		b.apply_central_force(Vector2(wind_cur * WIND_FORCE * hf, 0.0))
+
+
+func _check_collapse() -> void:
+	# 붕괴 = 블록이 바닥의 '죽음선'(지면/수면) 아래로 내려감. 흔들려도 안 떨어졌으면 산다.
+	if base == null:
+		return
+	var ky := base.kill_y()
+	for b in blocks:
+		if not is_instance_valid(b):
+			continue
+		var ext := 0.5 * (absf(b.bbox.x * sin(b.rotation)) + absf(b.bbox.y * cos(b.rotation)))
+		if b.position.y + ext > ky:
 			_game_over()
 			return
 
 
 ## 안착된 블록들의 최상단 y (낙하 중인 블록은 제외 → 높이가 튀지 않게)
 func _tower_top_edge() -> float:
-	var top := FOUNDATION_TOP   # 블록이 없으면 토대 윗면
+	var top := base.support_top_y() if base != null else FOUNDATION_TOP   # 블록 없으면 지지면
 	for b in blocks:
 		if is_instance_valid(b) and b.has_landed():
 			top = minf(top, _block_top_y(b))
@@ -808,10 +697,11 @@ func _draw() -> void:
 		return
 	var top_edge := _tower_top_edge()
 
-	# 최고 기록 라인 (해당 블록 타입의 최고 높이) — 이 선을 넘으면 기록 갱신 이펙트
-	var best_m := Graveyard.best_for(current_type.get("id", "brick"))
+	# 최고 기록 라인 (이 바닥×블록의 최고 높이) — 이 선을 넘으면 기록 갱신 이펙트
+	var line := base.base_line_y if base != null else FOUNDATION_TOP
+	var best_m := Graveyard.best_for(_rank_key())
 	if best_m > 0:
-		var ry := FOUNDATION_TOP - float(best_m) / METERS_PER_PX
+		var ry := line - float(best_m) / METERS_PER_PX
 		draw_dashed_line(Vector2(BASE_X - 420, ry), Vector2(BASE_X + 420, ry),
 			Color(1.0, 0.82, 0.3, 0.8), 4.0, 22.0)
 		if ui_font:
@@ -841,9 +731,10 @@ func _draw() -> void:
 					for i in n:
 						draw_line(p["pts"][i], p["pts"][(i + 1) % n], edge, 2.5)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		var col_bottom := base.kill_y() if base != null else GROUND_TOP_Y
 		draw_dashed_line(
 			Vector2(aim_x, center.y + half_h),
-			Vector2(aim_x, GROUND_TOP_Y),
+			Vector2(aim_x, col_bottom),
 			Color(0.98, 0.92, 0.55, 0.5), 2.0, 12.0)
 
 
@@ -861,7 +752,7 @@ func _update_camera(delta: float) -> void:
 		var needed := (GROUND_TOP_Y - tower_top_y) + 700.0   # 여백 포함 높이
 		z = clampf(1280.0 / needed, 0.16, 1.0)
 		target = Vector2(BASE_X, mid_y)
-	elif state == State.CALIB or state == State.SELECT or state == State.TUTORIAL:
+	elif state == State.BASE_SELECT or state == State.SELECT or state == State.TUTORIAL:
 		target = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
 		z = 1.0
 	else:
@@ -893,22 +784,7 @@ func _update_ui(delta: float) -> void:
 	elif playing:
 		height_label.text = "%d m" % _meters()
 		best_label.text = "%s %d m" % [Locale.t("best_short"),
-			maxi(Graveyard.best_for(current_type.get("id", "brick")), _peak_meters())]
-
-	if state == State.CALIB:
-		if awaiting_sensor:
-			calib_label.text = Locale.t("sensor_prompt")
-		else:
-			calib_timer -= delta
-			calib_label.text = Locale.t("calib_wait")
-			if not Motion.is_calibrating():
-				calib_panel.visible = false
-				# 보정 완료 → 첫 플레이면 조작법 튜토리얼, 아니면 바로 시작
-				if not Graveyard.tutorial_seen:
-					tut_from_select = false
-					_begin_tutorial()
-				else:
-					state = State.READY
+			maxi(Graveyard.best_for(_rank_key()), _peak_meters())]
 
 
 # ---------------------------------------------------------------- UI 구성
@@ -966,11 +842,11 @@ func _build_ui() -> void:
 	ingame_ui.add_child(inspect_hint)
 
 	_build_select_panel()
+	_build_base_select_panel()
 	_build_leaderboard_panel()
 	_build_settings_panel()
 	_build_language_panel()
 	_build_pause_panel()
-	_build_calib_panel()
 	_build_over_panel()
 
 
@@ -1046,6 +922,64 @@ func _type_name(t: Dictionary) -> String:
 	return str(t.get("name", ""))
 
 
+# ---------------------------------------------------------------- 바닥 선택
+
+func _build_base_select_panel() -> void:
+	base_panel = _make_overlay(Color(0.06, 0.07, 0.11, 1.0))
+	base_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	base_panel.visible = false
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	base_panel.add_child(center)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 24)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	center.add_child(box)
+	box.add_child(_centered(_make_label(Locale.t("base_title"), 40, Color(0.92, 0.9, 0.82))))
+	box.add_child(_centered(_make_label(Locale.t("base_sub"), 24, Color(0.6, 0.63, 0.72))))
+	box.add_child(_spacer(4))
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 18)
+	grid.add_theme_constant_override("v_separation", 18)
+	box.add_child(_centered(grid))
+	for bdef in BaseTypes.all():
+		grid.add_child(_make_base_tile(bdef))
+	box.add_child(_spacer(6))
+	box.add_child(_centered(_make_text_button(Locale.t("back"), 28, Vector2(200, 62), _begin_selection)))
+	ui.add_child(base_panel)
+
+
+func _make_base_tile(bdef: Dictionary) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(300, 172)
+	b.focus_mode = Control.FOCUS_NONE
+	_style_button(b, Color(0.11, 0.13, 0.18), Color(0.32, 0.37, 0.48))
+	b.pressed.connect(_choose_base.bind(bdef["id"]))
+	var icon: Control = load("res://scripts/base_icon.gd").new()
+	icon.kind = bdef.get("kind", "ground")
+	icon.position = Vector2(90, 12)
+	icon.size = Vector2(120, 108)
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(icon)
+	var lb := _make_label(_base_name(bdef), 28, Color(0.93, 0.9, 0.82))
+	lb.position = Vector2(0, 126)
+	lb.size = Vector2(300, 40)
+	lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(lb)
+	return b
+
+
+func _base_name(bdef: Dictionary) -> String:
+	var key: String = str(bdef.get("i18n", ""))
+	if key != "":
+		var s := Locale.t(key)
+		if s != key:
+			return s
+	return str(bdef.get("name", ""))
+
+
 # ---------------------------------------------------------------- 랭킹(리더보드)
 
 ## 인게임 랭킹 화면. 지금은 목업 데이터, 나중에 Google Play Games에서 받아 채운다.
@@ -1061,20 +995,36 @@ func _build_leaderboard_panel() -> void:
 	box.custom_minimum_size = Vector2(640, 0)
 	center.add_child(box)
 
-	# 헤더: <  [블록아이콘] 랭킹·이름  >
+	lb_title = _make_label(Locale.t("leaderboard"), 36, Color(0.98, 0.86, 0.4))
+	lb_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(_centered(lb_title))
+
+	# 바닥 선택 행: <  [바닥이름]  >
+	var brow := HBoxContainer.new()
+	brow.alignment = BoxContainer.ALIGNMENT_CENTER
+	brow.add_theme_constant_override("separation", 10)
+	brow.add_child(_make_text_button("<", 32, Vector2(56, 56), _lb_base_prev))
+	lb_base_label = _make_label("", 30, Color(0.7, 0.86, 0.98))
+	lb_base_label.custom_minimum_size = Vector2(300, 0)
+	lb_base_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	brow.add_child(lb_base_label)
+	brow.add_child(_make_text_button(">", 32, Vector2(56, 56), _lb_base_next))
+	box.add_child(brow)
+
+	# 블록 선택 행: <  [블록아이콘] [블록이름]  >
 	var header := HBoxContainer.new()
 	header.alignment = BoxContainer.ALIGNMENT_CENTER
-	header.add_theme_constant_override("separation", 12)
-	header.add_child(_make_text_button("<", 40, Vector2(64, 66), _lb_prev))
+	header.add_theme_constant_override("separation", 10)
+	header.add_child(_make_text_button("<", 32, Vector2(56, 56), _lb_prev))
 	lb_icon = load("res://scripts/type_icon.gd").new()
-	lb_icon.custom_minimum_size = Vector2(64, 64)
+	lb_icon.custom_minimum_size = Vector2(54, 54)
 	lb_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	header.add_child(lb_icon)
-	lb_title = _make_label(Locale.t("leaderboard"), 36, Color(0.98, 0.86, 0.4))
-	lb_title.custom_minimum_size = Vector2(300, 0)
-	lb_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	header.add_child(lb_title)
-	header.add_child(_make_text_button(">", 40, Vector2(64, 66), _lb_next))
+	lb_block_label = _make_label("", 30, Color(0.95, 0.92, 0.82))
+	lb_block_label.custom_minimum_size = Vector2(240, 0)
+	lb_block_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	header.add_child(lb_block_label)
+	header.add_child(_make_text_button(">", 32, Vector2(56, 56), _lb_next))
 	box.add_child(header)
 
 	box.add_child(_lb_header_row())
@@ -1105,6 +1055,7 @@ func _lb_cell(text: String, fsize: int, color: Color, w: float, align: int) -> L
 
 
 func _open_leaderboard() -> void:
+	lb_base = BaseTypes.index_of(current_base.get("id", "ground"))
 	lb_view = _type_index(current_type.get("id", "brick"))
 	_refresh_leaderboard()
 	ui.move_child(lb_panel, ui.get_child_count() - 1)   # 다른 패널 위로
@@ -1125,6 +1076,16 @@ func _lb_next() -> void:
 	_refresh_leaderboard()
 
 
+func _lb_base_prev() -> void:
+	lb_base = (lb_base + BaseTypes.all().size() - 1) % BaseTypes.all().size()
+	_refresh_leaderboard()
+
+
+func _lb_base_next() -> void:
+	lb_base = (lb_base + 1) % BaseTypes.all().size()
+	_refresh_leaderboard()
+
+
 func _type_index(id: String) -> int:
 	var all := BlockTypes.all()
 	for i in all.size():
@@ -1133,16 +1094,19 @@ func _type_index(id: String) -> int:
 	return 0
 
 
-## 목업 랭킹을 다시 그린다. 내 최고 기록이 있으면 내 자리를 끼워 강조한다.
+## 목업 랭킹을 다시 그린다(바닥×블록). 내 최고 기록이 있으면 내 자리를 끼워 강조한다.
 func _refresh_leaderboard() -> void:
+	var bdef: Dictionary = BaseTypes.all()[lb_base]
 	var t: Dictionary = BlockTypes.all()[lb_view]
-	lb_title.text = "%s · %s" % [Locale.t("leaderboard"), _type_name(t)]
+	lb_base_label.text = _base_name(bdef)
+	lb_block_label.text = _type_name(t)
 	if lb_icon != null:
 		lb_icon.type_def = t
 		lb_icon.queue_redraw()
 	for c in lb_rows.get_children():
 		c.queue_free()
-	var rows: Array = Leaderboard.entries(t["id"], Graveyard.best_for(t["id"]), Locale.t("you"))
+	var key := "%s:%s" % [bdef["id"], t["id"]]
+	var rows: Array = Leaderboard.entries(bdef["id"], t["id"], Graveyard.best_for(key), Locale.t("you"))
 	var me_row: Dictionary = {}
 	var count := 0
 	for e in rows:
@@ -1439,33 +1403,6 @@ func _style_button(b: Button, bg: Color, border: Color) -> void:
 	b.add_theme_color_override("font_color", Color(0.94, 0.92, 0.86))
 
 
-func _build_calib_panel() -> void:
-	calib_panel = _make_overlay(Color(0.04, 0.045, 0.07, 0.92))
-	var center := CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
-	calib_panel.add_child(center)
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 30)
-	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	center.add_child(box)
-
-	calib_label = _make_label("", 42, Color(0.9, 0.88, 0.8))
-	calib_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(_centered(calib_label))
-
-	calib_button = Button.new()
-	calib_button.text = Locale.t("sensor_on")
-	if ui_font:
-		calib_button.add_theme_font_override("font", ui_font)
-	calib_button.add_theme_font_size_override("font_size", 40)
-	calib_button.custom_minimum_size = Vector2(320, 96)
-	calib_button.visible = false
-	calib_button.pressed.connect(_on_sensor_enable)
-	box.add_child(_centered(calib_button))
-
-	ui.add_child(calib_panel)
-
-
 func _build_over_panel() -> void:
 	over_panel = _make_overlay(Color(0.03, 0.03, 0.05, 0.9))
 	over_panel.visible = false
@@ -1483,18 +1420,19 @@ func _show_game_over() -> void:
 	for c in over_body.get_children():
 		c.queue_free()
 
-	var tid: String = current_type.get("id", "brick")
+	var key := _rank_key()
 	var tname: String = _type_name(current_type)
+	var combo: String = "%s · %s" % [_base_name(current_base), tname]
 	over_body.add_child(_centered(_make_label(Locale.t("go_title"), 72, Color(0.9, 0.35, 0.32))))
 	over_body.add_child(_centered(_make_label(Locale.t("go_line1"), 32, Color(0.82, 0.8, 0.85))))
 	over_body.add_child(_spacer(10))
 	over_body.add_child(_centered(_make_label(
-		Locale.t("go_this") % [tname, _peak_meters()], 40, Color(0.95, 0.93, 0.8))))
+		Locale.t("go_this") % [combo, _peak_meters()], 40, Color(0.95, 0.93, 0.8))))
 	over_body.add_child(_centered(_make_label(
-		Locale.t("go_best") % Graveyard.best_for(tid), 28, Color(0.6, 0.62, 0.7))))
+		Locale.t("go_best") % Graveyard.best_for(key), 28, Color(0.6, 0.62, 0.7))))
 
-	# 역대 잔해 무덤 (이 블록 타입)
-	var recent: Array = Graveyard.recent(tid, 6)
+	# 역대 잔해 무덤 (이 바닥×블록)
+	var recent: Array = Graveyard.recent(key, 6)
 	if recent.size() > 0:
 		over_body.add_child(_spacer(12))
 		over_body.add_child(_centered(_make_label(

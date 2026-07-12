@@ -25,12 +25,15 @@ const _MOCK := {
 }
 
 
-## type_id 랭킹 목록 + 내 최고 기록(my_best>0이면 내 자리를 끼워 정렬).
-static func entries(type_id: String, my_best: int, my_name := "나") -> Array:
-	var src: Array = _MOCK.get(type_id, _MOCK["brick"])
+## 바닥×블록 랭킹 목록 + 내 최고 기록(my_best>0이면 내 자리를 끼워 정렬).
+## 어려운 바닥일수록(diff↑) 목업 높이를 낮춰 조합마다 다른 판을 만든다.
+static func entries(base_id: String, block_id: String, my_best: int, my_name := "나") -> Array:
+	var src: Array = _MOCK.get(block_id, _MOCK["brick"])
+	var diff: float = float(BaseTypes.get_type(base_id).get("diff", 1.0))
+	var scale: float = 1.0 / diff
 	var out: Array = []
 	for e in src:
-		out.append({"name": e[0], "m": int(e[1]), "me": false})
+		out.append({"name": e[0], "m": int(round(int(e[1]) * scale)), "me": false})
 	if my_best > 0:
 		out.append({"name": my_name, "m": my_best, "me": true})
 	out.sort_custom(func(a, b): return a["m"] > b["m"])

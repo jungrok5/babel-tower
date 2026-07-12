@@ -109,12 +109,11 @@ func _draw() -> void:
 			_draw_ripple(bc_r + Vector2(-34.0, 22.0), rp)
 			_draw_ripple(bc_r + Vector2(40.0, 28.0), rp)
 	else:
-		# ③ 기기를 수평으로 (흔들리면 무너짐)
+		# ③ 균형을 잃으면 무너짐 (탑이 흔들리다 넘어감)
 		cap = Locale.t("tut_still")
 		var lp_s := cyc - P2
 		var wob := sin(lp_s * 7.0) * 0.05 * clampf((lp_s - 0.3) * 1.5, 0.0, 1.0)
 		_draw_mini_tower(ped, bs, wob)
-		_draw_level_hint(Vector2(360.0, 430.0), wob)
 
 	if font:
 		_text(Vector2(24, 990), cap, VW - 48, 32, Color(0.90, 0.93, 0.99), 5)
