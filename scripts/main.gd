@@ -33,6 +33,7 @@ var current_type: Dictionary = {}   # 선택한 블록 타입(벽돌/상자/…)
 var current_base: Dictionary = {}   # 선택한 바닥 타입(땅/참외/시소/뗏목)
 var base: TowerBase = null          # 현재 바닥 물리 리그
 var peak_px: float = 0.0            # 이번 판에서 도달한 최고 실제 높이(px)
+var view_height_px: float = 0.0     # 카메라·배경용 '부드럽게 스무딩한' 높이(부력 출렁임 제거)
 var go_shake: float = 0.0           # 붕괴 순간의 카메라 흔들림 버스트
 var aiming := false                 # 손을 대고 위치를 조준 중인가
 var aim_x := BASE_X                 # 떨어뜨릴 가로 위치(월드 좌표)
@@ -244,6 +245,7 @@ func _reset_play_vars() -> void:
 	blocks.clear()
 	score = 0
 	peak_px = 0.0
+	view_height_px = 0.0
 	aiming = false
 	settling = null
 	aim_x = BASE_X
@@ -578,6 +580,9 @@ func _update_birds(delta: float) -> void:
 
 func _spawn_bird() -> void:
 	bird_timer = randf_range(7.0, 13.0)
+	# 앉는 새는 안정된 '땅' 바닥에서만 (물/시소 등 불안정 바닥에선 탑을 무너뜨려서 뺀다)
+	if current_base.get("id", "ground") != "ground":
+		return
 	var m := _meters()
 	if m < 10 or m > 150:          # 지면 근처·고공엔 (앉는) 새 없음
 		return
@@ -663,9 +668,11 @@ func _process(delta: float) -> void:
 	world_time += delta
 	if state != State.READY:
 		wind_cur = lerpf(wind_cur, 0.0, 0.05)   # 플레이 중이 아니면 바람 잦아듦
+	# 카메라·배경용 높이를 부드럽게 스무딩 → 참외/뗏목의 부력 출렁임이 배경까지 흔들지 않게
+	view_height_px = lerpf(view_height_px, _height_px(), 0.08)
 	if sky != null:
-		# 관찰 모드에선 카메라 고도로 하늘을 미리보기(우주까지), 그 외엔 실제 탑 높이
-		sky.meters = _inspect_view_meters() if inspect else float(_meters())
+		# 관찰 모드에선 카메라 고도로 하늘을 미리보기(우주까지), 그 외엔 스무딩한 탑 높이
+		sky.meters = _inspect_view_meters() if inspect else float(view_height_px * METERS_PER_PX)
 		sky.t = world_time
 		sky.wind = wind_cur
 	if wind_fx != null:
@@ -756,7 +763,9 @@ func _update_camera(delta: float) -> void:
 		target = Vector2(BASE_X, GROUND_TOP_Y - 200.0)
 		z = 1.0
 	else:
-		target = Vector2(BASE_X, _tower_top_edge() - 200.0)
+		# 스무딩한 높이 기준(부력 출렁임에 카메라가 따라 흔들리지 않게)
+		var anchor := (base.base_line_y - view_height_px) if base != null else _tower_top_edge()
+		target = Vector2(BASE_X, anchor - 200.0)
 		# 높이 오를수록 줌아웃 → 작은 떨림도 크게 보이는 "공포" 시스템
 		z = clampf(1.0 - float(score) * 0.03, 0.42, 1.0)
 	var lerp_amt := 0.16 if inspect else 0.09
@@ -782,7 +791,7 @@ func _update_ui(delta: float) -> void:
 		if inspect_hint != null:
 			inspect_hint.text = "%s   ·   ▲ %d m" % [Locale.t("inspect_hint"), int(_inspect_view_meters())]
 	elif playing:
-		height_label.text = "%d m" % _meters()
+		height_label.text = "%d m" % int(round(view_height_px * METERS_PER_PX))
 		best_label.text = "%s %d m" % [Locale.t("best_short"),
 			maxi(Graveyard.best_for(_rank_key()), _peak_meters())]
 

@@ -68,10 +68,8 @@ func _gen_sky() -> void:
 ## 환경요소를 매 판마다 새로 뿌린다(랜덤 · 희귀 요소 포함) → "이번엔 뭐가 보일까"
 func regen_env() -> void:
 	_env.clear()
-	for i in 3:
-		_add("butterfly", randf_range(3.0, 40.0), {"col": _pick(_BFLY_COLS), "ph": randf() * TAU, "par": randf_range(1.05, 1.3)})
-	for i in 2:
-		_add("birdflock", randf_range(30.0, 110.0), {"n": randi_range(3, 5), "dir": _dir(), "spd": randf_range(22.0, 42.0), "par": randf_range(0.7, 1.0)})
+	_add("butterfly", randf_range(4.0, 40.0), {"col": _pick(_BFLY_COLS), "ph": randf() * TAU, "par": randf_range(1.05, 1.3)})
+	_add("birdflock", randf_range(30.0, 110.0), {"n": randi_range(3, 5), "dir": _dir(), "spd": randf_range(22.0, 42.0), "par": randf_range(0.7, 1.0)})
 	for i in 2:
 		_add("balloon", randf_range(60.0, 260.0), {"col": _pick(_BAL_COLS), "rise": randf_range(4.0, 9.0), "ph": randf() * TAU, "par": randf_range(0.85, 1.15)})
 	if randf() < 0.8:
