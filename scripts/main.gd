@@ -580,9 +580,7 @@ func _update_birds(delta: float) -> void:
 
 func _spawn_bird() -> void:
 	bird_timer = randf_range(7.0, 13.0)
-	# 앉는 새는 안정된 '땅' 바닥에서만 (물/시소 등 불안정 바닥에선 탑을 무너뜨려서 뺀다)
-	if current_base.get("id", "ground") != "ground":
-		return
+	# 물리 없는 장식용 새 — 모든 바닥에서 등장(집중 흐리기용, 탑은 안 건드림)
 	var m := _meters()
 	if m < 10 or m > 150:          # 지면 근처·고공엔 (앉는) 새 없음
 		return

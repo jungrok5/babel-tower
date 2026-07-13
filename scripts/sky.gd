@@ -68,7 +68,6 @@ func _gen_sky() -> void:
 ## 환경요소를 매 판마다 새로 뿌린다(랜덤 · 희귀 요소 포함) → "이번엔 뭐가 보일까"
 func regen_env() -> void:
 	_env.clear()
-	_add("butterfly", randf_range(4.0, 40.0), {"col": _pick(_BFLY_COLS), "ph": randf() * TAU, "par": randf_range(1.05, 1.3)})
 	_add("birdflock", randf_range(30.0, 110.0), {"n": randi_range(3, 5), "dir": _dir(), "spd": randf_range(22.0, 42.0), "par": randf_range(0.7, 1.0)})
 	for i in 2:
 		_add("balloon", randf_range(60.0, 260.0), {"col": _pick(_BAL_COLS), "rise": randf_range(4.0, 9.0), "ph": randf() * TAU, "par": randf_range(0.85, 1.15)})
@@ -87,7 +86,6 @@ func regen_env() -> void:
 ## 테스트용: 모든 종류를 알려진 고도에 하나씩 강제 배치(스샷 검증).
 func force_all_env() -> void:
 	_env.clear()
-	_add("butterfly", 15.0, {"col": _BFLY_COLS[0], "ph": 0.0, "par": 1.2})
 	_add("birdflock", 60.0, {"n": 5, "dir": 1.0, "spd": 30.0, "par": 0.9})
 	_add("balloon", 120.0, {"col": _BAL_COLS[0], "rise": 0.0, "ph": 0.0, "par": 1.0})
 	_add("plane", 130.0, {"dir": 1.0, "spd": 0.0, "par": 0.7})

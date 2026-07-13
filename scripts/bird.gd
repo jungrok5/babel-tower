@@ -1,7 +1,7 @@
 extends AnimatableBody2D
-## 새: 날아 들어와 잠시 로밍하다 블록 위에 앉는다. 물리 객체라서 앉아 있을 때 그 위로
-## 블록을 놓으면 새에 걸쳐 기울고, 날아갈 때 위로 블록을 들어올리며 떠난다.
-## 로밍/진입 중에는 충돌을 꺼서 블록을 치지 않는다.
+## 새: 날아 들어와 잠시 로밍하다 블록 위에 앉았다 떠난다.
+## 물리 없음(장식·집중 흐리기용) — 충돌을 절대 켜지 않아 탑을 건드리지 않는다.
+## 앉을 때는 꼭대기 블록 윗면을 따라 '시각적으로만' 붙어 있는다.
 
 signal left
 
@@ -76,9 +76,8 @@ func _physics_process(dt: float) -> void:
 				var pp := _perch_point()
 				position = position.lerp(pp, 0.16)
 				if position.distance_to(pp) < 14.0:
-					# 자리에 도착한 뒤에야 충돌을 켠다 → 탑을 들이받지 않음
+					# 물리 없음: 충돌을 켜지 않고 블록 윗면에 시각적으로만 앉는다
 					position = pp
-					cshape.disabled = false
 					s = S.PERCH
 					timer = randf_range(3.5, 6.5)
 		S.PERCH:
