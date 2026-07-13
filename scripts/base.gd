@@ -14,6 +14,9 @@ class_name TowerBase
 const BASE_X := 360.0
 const GROUND_Y := 1050.0
 const WATER_Y := 1015.0
+# 물 붕괴선은 수면보다 한참 아래 — 하중으로 배가 출렁이며 수면에 살짝 잠기는 건 붕괴 아님.
+# 블록이 이 깊이까지 '가라앉아야'(떨어져 나갔거나 배가 완전히 침몰) 붕괴로 본다.
+const WATER_KILL := WATER_Y + 150.0
 
 var kind := "ground"
 var support_body: PhysicsBody2D = null
@@ -197,7 +200,7 @@ func _build_melon() -> void:
 	_buoy_k2 = 1.6
 	_center_k = 14.0
 	base_line_y = 958.0 - r + 12.0
-	_kill_y = WATER_Y
+	_kill_y = WATER_KILL
 
 
 # ---------------------------------------------------------------- 물 위 뗏목
@@ -240,7 +243,7 @@ func _build_raft() -> void:
 	_buoy_k2 = 1.1
 	_center_k = 14.0
 	base_line_y = 992.0 - hh - 12.0
-	_kill_y = WATER_Y
+	_kill_y = WATER_KILL
 
 
 # ---------------------------------------------------------------- 시소

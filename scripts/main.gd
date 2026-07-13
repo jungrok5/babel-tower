@@ -440,9 +440,12 @@ func _wait_collapse_settled() -> void:
 		frames += 1
 		if frames < 36:
 			continue
+		# 물 아래로 한참 가라앉은 블록은 '끝난 것'으로 보고 무시(물에선 영원히 가라앉아 안 멈춤)
+		var deep := (base.kill_y() + 300.0) if base != null else 1.0e9
 		var moving := false
 		for b in blocks:
-			if is_instance_valid(b) and b is RigidBody2D and b.linear_velocity.length() > 24.0:
+			if is_instance_valid(b) and b is RigidBody2D and b.position.y < deep \
+					and b.linear_velocity.length() > 24.0:
 				moving = true
 				break
 		still_for = still_for + 1 if not moving else 0
